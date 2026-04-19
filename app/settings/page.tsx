@@ -3,13 +3,14 @@ import { AddSpaceForm } from '@/components/AddSpaceForm';
 import { ChannelSettingsRow } from '@/components/ChannelSettingsRow';
 import { QuotaCard } from '@/components/QuotaCard';
 import { SpaceSettingsRow } from '@/components/SpaceSettingsRow';
+import { getCookieChannelStore } from '@/lib/channels-cookie';
 import { getSession } from '@/lib/session';
 import {
   getEnvChannelIds,
   getWhitelistedChannelPreferences,
   getWhitelistedChannelSpaces,
 } from '@/lib/whitelist';
-import { getChannels, getYouTubeQuotaSummary } from '@/lib/youtube';
+import { getChannels, getYouTubeQuotaSummary, trackYouTubeQuotaUsage } from '@/lib/youtube';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,14 +25,25 @@ export default async function SettingsPage() {
   const quotaViewerEmail = (process.env.YOUTUBE_QUOTA_VIEWER_EMAIL ?? '').trim().toLowerCase();
   const canViewQuota =
     !!quotaViewerEmail && session?.user?.email?.trim().toLowerCase() === quotaViewerEmail;
-  const quota = canViewQuota ? await getYouTubeQuotaSummary(allIds.length, session?.accessToken) : null;
 
   let channels: Awaited<ReturnType<typeof getChannels>> = [];
   try {
     channels = await getChannels(allIds);
+
+    if (session?.accessToken) {
+      try {
+        const cookieStore = await getCookieChannelStore();
+        const channelCalls = allIds.length === 0 ? 0 : Math.ceil(allIds.length / 50);
+        await trackYouTubeQuotaUsage(session.accessToken, channelCalls, cookieStore);
+      } catch {
+        // Keep settings usable even if quota persistence fails.
+      }
+    }
   } catch {
     // Show IDs if API fails
   }
+
+  const quota = canViewQuota ? await getYouTubeQuotaSummary(allIds.length, session?.accessToken) : null;
 
   const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
   const preferencesBySpace = new Map(

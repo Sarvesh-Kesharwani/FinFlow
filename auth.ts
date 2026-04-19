@@ -14,8 +14,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             'profile',
             // Drive appdata = hidden app folder in user's Drive, perfect for storing preferences
             'https://www.googleapis.com/auth/drive.appdata',
-            // Read Cloud Monitoring quota metrics for the signed-in Google Cloud project owner.
-            'https://www.googleapis.com/auth/monitoring.read',
           ].join(' '),
           access_type: 'offline', // get refresh_token
           prompt: 'consent',       // always show consent to ensure refresh_token is returned

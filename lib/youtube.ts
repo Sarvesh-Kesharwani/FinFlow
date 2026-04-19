@@ -3,30 +3,23 @@
 
 import 'server-only';
 import { cache } from 'react';
+import { getQuotaResetTimezone, readDriveChannels, recordDriveQuotaUsage } from './drive';
 import { matchesMediaFilter } from './media';
 import { getRequestTime } from './render';
 import { rangeToMs, withinRange } from './time';
-import type { Channel, ChannelWithVideos, MediaFilter, QuotaSummary, TimeRange, Video } from './types';
+import type {
+  Channel,
+  ChannelPreferenceStore,
+  ChannelWithVideos,
+  MediaFilter,
+  QuotaSummary,
+  TimeRange,
+  Video,
+} from './types';
 import { getWhitelistedChannelIds } from './whitelist';
 
 const API = 'https://www.googleapis.com/youtube/v3';
-const MONITORING_API = 'https://monitoring.googleapis.com/v3';
-const YOUTUBE_MONITORED_SERVICE = 'youtube.googleapis.com';
 export const YOUTUBE_DAILY_QUOTA_LIMIT = 10_000;
-
-interface MonitoringTimeSeriesResponse {
-  timeSeries?: Array<{
-    metric?: {
-      labels?: Record<string, string>;
-    };
-    points?: Array<{
-      interval?: { endTime?: string };
-      value?: { int64Value?: string };
-    }>;
-  }>;
-}
-
-type MonitoringTimeSeries = NonNullable<MonitoringTimeSeriesResponse['timeSeries']>[number];
 
 function key(): string {
   const k = process.env.YOUTUBE_API_KEY;
@@ -160,137 +153,6 @@ function buildQuotaSummary(
   };
 }
 
-function latestPointValue(
-  series: MonitoringTimeSeries | undefined,
-): { value: number; updatedAt?: string } | null {
-  if (!series?.points?.length) return null;
-
-  const point = [...series.points].sort((a, b) => {
-    const aTime = Date.parse(a.interval?.endTime ?? '');
-    const bTime = Date.parse(b.interval?.endTime ?? '');
-    return bTime - aTime;
-  })[0];
-  const rawValue = Number(point.value?.int64Value);
-  if (!Number.isFinite(rawValue)) return null;
-
-  return {
-    value: rawValue,
-    updatedAt: point.interval?.endTime,
-  };
-}
-
-async function listMonitoringTimeSeries(
-  projectId: string,
-  accessToken: string,
-  filter: string,
-  hours = 48,
-): Promise<MonitoringTimeSeries[]> {
-  const end = new Date();
-  const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
-  const qs = new URLSearchParams({
-    filter,
-    'interval.startTime': start.toISOString(),
-    'interval.endTime': end.toISOString(),
-    view: 'FULL',
-    pageSize: '200',
-  });
-
-  const res = await fetch(`${MONITORING_API}/projects/${projectId}/timeSeries?${qs.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-    next: { revalidate: 60 },
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Monitoring API ${res.status}: ${body.slice(0, 200)}`);
-  }
-
-  const data = (await res.json()) as MonitoringTimeSeriesResponse;
-  return data.timeSeries ?? [];
-}
-
-function getQuotaProjectId(): string | undefined {
-  const configured = process.env.YOUTUBE_QUOTA_PROJECT_ID?.trim();
-  if (configured) return configured;
-
-  const generic = process.env.GOOGLE_CLOUD_PROJECT?.trim();
-  if (generic) return generic;
-
-  return undefined;
-}
-
-async function getExactYouTubeQuotaSummary(
-  accessToken: string | undefined,
-  channelCalls: number,
-  playlistCalls: number,
-  videoDetailCalls: number,
-): Promise<QuotaSummary | null> {
-  const projectId = getQuotaProjectId();
-  if (!projectId || !accessToken) return null;
-
-  const limitSeries = await listMonitoringTimeSeries(
-    projectId,
-    accessToken,
-    [
-      'metric.type="serviceruntime.googleapis.com/quota/limit"',
-      'resource.type="consumer_quota"',
-      `resource.labels.service="${YOUTUBE_MONITORED_SERVICE}"`,
-    ].join(' AND '),
-  );
-
-  const dailyLimit = limitSeries
-    .map((series) => {
-      const limitName = series.metric?.labels?.limit_name ?? '';
-      const quotaMetric = series.metric?.labels?.quota_metric ?? '';
-      const latest = latestPointValue(series);
-      return {
-        limitName,
-        quotaMetric,
-        value: latest?.value,
-        updatedAt: latest?.updatedAt,
-      };
-    })
-    .filter((series) => Number.isFinite(series.value) && /day/i.test(series.limitName))
-    .sort((a, b) => {
-      const aScore = /queries/i.test(a.limitName) ? 2 : /requests/i.test(a.limitName) ? 1 : 0;
-      const bScore = /queries/i.test(b.limitName) ? 2 : /requests/i.test(b.limitName) ? 1 : 0;
-      return bScore - aScore;
-    })[0];
-
-  if (!dailyLimit?.quotaMetric || typeof dailyLimit.value !== 'number') return null;
-
-  const usageSeries = await listMonitoringTimeSeries(
-    projectId,
-    accessToken,
-    [
-      'metric.type="serviceruntime.googleapis.com/quota/allocation/usage"',
-      'resource.type="consumer_quota"',
-      `resource.labels.service="${YOUTUBE_MONITORED_SERVICE}"`,
-      `metric.labels.quota_metric="${dailyLimit.quotaMetric}"`,
-    ].join(' AND '),
-    26,
-  );
-
-  const latestUsage = usageSeries
-    .map((series) => latestPointValue(series))
-    .filter((point): point is NonNullable<typeof point> => point !== null)
-    .sort((a, b) => Date.parse(b.updatedAt ?? '') - Date.parse(a.updatedAt ?? ''))[0];
-
-  return buildQuotaSummary(
-    dailyLimit.value,
-    latestUsage?.value ?? 0,
-    'exact',
-    'Google Cloud Monitoring',
-    dailyLimit.limitName,
-    channelCalls,
-    playlistCalls,
-    videoDetailCalls,
-    latestUsage?.updatedAt ?? dailyLimit.updatedAt,
-  );
-}
-
 export async function getChannels(ids?: string[]): Promise<Channel[]> {
   if (!ids) ids = await getWhitelistedChannelIds();
   if (ids.length === 0) return [];
@@ -331,13 +193,12 @@ export function getEstimatedFeedQuotaSummary(
   const channelCalls = channelCount === 0 ? 0 : Math.ceil(channelCount / 50);
   const playlistCalls = channelCount * estimatedPlaylistPagesPerChannel;
   const videoDetailCalls = channelCount * estimatedPlaylistPagesPerChannel;
-  const refreshCost = channelCalls + playlistCalls + videoDetailCalls;
   return buildQuotaSummary(
     YOUTUBE_DAILY_QUOTA_LIMIT,
-    refreshCost,
+    0,
     'estimated',
-    'Tubeo estimate',
-    'Exact quota requires Monitoring scope plus a configured Google Cloud project ID.',
+    'Tubeo request estimate',
+    `Tubeo tracks usage in Drive app data and resets it each midnight (${getQuotaResetTimezone()}). This is the expected cost of one feed refresh.`,
     channelCalls,
     playlistCalls,
     videoDetailCalls,
@@ -352,19 +213,46 @@ export async function getYouTubeQuotaSummary(
   const estimated = getEstimatedFeedQuotaSummary(channelCount, estimatedPlaylistPagesPerChannel);
 
   try {
-    const exact = await getExactYouTubeQuotaSummary(
-      accessToken,
+    if (!accessToken) return estimated;
+
+    const driveData = await readDriveChannels(accessToken);
+    if (!driveData) {
+      return {
+        ...estimated,
+        sourceDetail: `Tubeo starts persistent quota tracking after the first signed-in request syncs to Drive app data. Resets each midnight (${getQuotaResetTimezone()}).`,
+      };
+    }
+
+    return buildQuotaSummary(
+      YOUTUBE_DAILY_QUOTA_LIMIT,
+      driveData.quota.used,
+      'tracked',
+      'Tubeo daily tracker',
+      `Counts each YouTube API call Tubeo records in Drive app data and resets each midnight (${getQuotaResetTimezone()}).`,
       estimated.channelCalls,
       estimated.playlistCalls,
       estimated.videoDetailCalls,
+      driveData.quota.updatedAt || driveData.updatedAt,
     );
-    return exact ?? estimated;
   } catch (error) {
     return {
       ...estimated,
       sourceDetail: `Fell back to estimate: ${(error as Error).message}`,
     };
   }
+}
+
+export async function trackYouTubeQuotaUsage(
+  accessToken: string | undefined,
+  quota: Pick<QuotaSummary, 'refreshCost'> | number,
+  fallbackStore?: ChannelPreferenceStore,
+): Promise<void> {
+  if (!accessToken) return;
+
+  const units = typeof quota === 'number' ? quota : quota.refreshCost;
+  if (units <= 0) return;
+
+  await recordDriveQuotaUsage(accessToken, units, fallbackStore);
 }
 
 async function getLatestVideosForChannelWithQuota(
@@ -461,14 +349,45 @@ export const getChannelGroupedFeed = cache(async function getChannelGroupedFeed(
   perChannel = 6,
   now = getRequestTime(),
 ): Promise<ChannelWithVideos[]> {
+  return (await getChannelGroupedFeedWithQuota(range, mediaFilter, perChannel, now)).groups;
+});
+
+export const getChannelGroupedFeedWithQuota = cache(async function getChannelGroupedFeedWithQuota(
+  range: TimeRange,
+  mediaFilter: MediaFilter = 'all',
+  perChannel = 6,
+  now = getRequestTime(),
+): Promise<{ groups: ChannelWithVideos[]; quota: QuotaSummary }> {
   const channels = await getChannels();
   const results = await Promise.all(
-    channels.map(async (channel) => ({
-      channel,
-      videos: await getLatestVideosForChannel(channel, range, mediaFilter, perChannel, now),
-    })),
+    channels.map(async (channel) => {
+      const { videos, playlistCalls, videoDetailCalls } = await getLatestVideosForChannelWithQuota(
+        channel,
+        range,
+        mediaFilter,
+        perChannel,
+        now,
+      );
+      return { channel, videos, playlistCalls, videoDetailCalls };
+    }),
   );
-  return results;
+  const channelCalls = channels.length === 0 ? 0 : Math.ceil(channels.length / 50);
+  const playlistCalls = results.reduce((sum, result) => sum + result.playlistCalls, 0);
+  const videoDetailCalls = results.reduce((sum, result) => sum + result.videoDetailCalls, 0);
+
+  return {
+    groups: results.map(({ channel, videos }) => ({ channel, videos })),
+    quota: buildQuotaSummary(
+      YOUTUBE_DAILY_QUOTA_LIMIT,
+      0,
+      'estimated',
+      'Tubeo request estimate',
+      'This request cost will be added to today\'s tracked total after the page finishes loading.',
+      channelCalls,
+      playlistCalls,
+      videoDetailCalls,
+    ),
+  };
 });
 
 export const getMixedFeed = cache(async function getMixedFeed(
@@ -511,10 +430,10 @@ export const getMixedFeedWithQuota = cache(async function getMixedFeedWithQuota(
     videos,
     quota: buildQuotaSummary(
       YOUTUBE_DAILY_QUOTA_LIMIT,
-      channelCalls + playlistCalls + videoDetailCalls,
+      0,
       'estimated',
-      'Tubeo estimate',
-      'Feed responses still use request-cost estimation.',
+      'Tubeo request estimate',
+      'This request cost will be added to today\'s tracked total after the page finishes loading.',
       channelCalls,
       playlistCalls,
       videoDetailCalls,

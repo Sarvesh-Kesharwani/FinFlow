@@ -4,12 +4,13 @@ import { EmptyState } from '@/components/EmptyState';
 import { MediaTypeFilter } from '@/components/MediaTypeFilter';
 import { SpaceTabs } from '@/components/SpaceTabs';
 import { TimeFilter } from '@/components/TimeFilter';
+import { getCookieChannelStore } from '@/lib/channels-cookie';
 import { parseMediaFilter } from '@/lib/media';
 import { getRequestTime } from '@/lib/render';
 import { getSession } from '@/lib/session';
 import { parseRange } from '@/lib/time';
 import { DEFAULT_CHANNEL_SPACE } from '@/lib/types';
-import { getChannelGroupedFeed } from '@/lib/youtube';
+import { getChannelGroupedFeedWithQuota, trackYouTubeQuotaUsage } from '@/lib/youtube';
 import { getWhitelistedChannelPreferences, getWhitelistedChannelSpaces } from '@/lib/whitelist';
 
 export const dynamic = 'force-dynamic';
@@ -85,7 +86,17 @@ async function Grouped({
 
   let groups;
   try {
-    groups = await getChannelGroupedFeed(range, media, 6, now);
+    const result = await getChannelGroupedFeedWithQuota(range, media, 6, now);
+    groups = result.groups;
+
+    if (session.accessToken) {
+      try {
+        const cookieStore = await getCookieChannelStore();
+        await trackYouTubeQuotaUsage(session.accessToken, result.quota, cookieStore);
+      } catch {
+        // Don't block the channels page if quota persistence fails.
+      }
+    }
   } catch (error) {
     return <EmptyState emoji="!" title="Couldn't load channels" description={(error as Error).message} />;
   }

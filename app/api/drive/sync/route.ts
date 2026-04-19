@@ -50,14 +50,17 @@ export async function POST() {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
+  let driveData = null;
   const cookieStore = await getCookieChannelStore();
   const envIds = getEnvChannelIds();
   const cookieOnly = cookieStore.channels.filter((channel) => !envIds.includes(channel.id));
 
   try {
+    driveData = await readDriveChannels(session.accessToken);
     await writeDriveChannels(session.accessToken, {
       channels: cookieOnly,
       spaces: cookieStore.spaces,
+      quota: driveData?.quota,
     });
   } catch {
     return Response.json({ error: 'Failed to write Drive sync state' }, { status: 502 });

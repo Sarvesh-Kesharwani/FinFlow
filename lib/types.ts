@@ -21,6 +21,12 @@ export interface ChannelPreferenceStore {
   spaces: string[];
 }
 
+export interface DailyQuotaUsage {
+  date: string;
+  used: number;
+  updatedAt: string;
+}
+
 export interface Video {
   id: string;
   title: string;
@@ -45,7 +51,7 @@ export interface QuotaSummary {
   remainingToday: number;
   usedTodayPercent: number;
   refreshCost: number;
-  source: 'exact' | 'estimated';
+  source: 'tracked' | 'estimated';
   sourceLabel: string;
   sourceDetail?: string;
   updatedAt?: string;

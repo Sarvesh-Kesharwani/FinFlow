@@ -36,7 +36,7 @@ export function QuotaCard({ quota }: { quota: QuotaSummary }) {
       <div className="space-y-1 text-sm text-duo-mute">
         <p>
           Source: <span className="font-bold text-duo-ink">{quota.sourceLabel}</span>
-          {quota.updatedAt ? ` • Updated ${new Date(quota.updatedAt).toLocaleTimeString()}` : ''}
+          {quota.updatedAt ? ` - Updated ${new Date(quota.updatedAt).toLocaleTimeString()}` : ''}
         </p>
         {quota.sourceDetail && <p>{quota.sourceDetail}</p>}
         <p>

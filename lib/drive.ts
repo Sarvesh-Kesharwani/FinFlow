@@ -3,6 +3,7 @@
 import { normalizeSpaceName } from './spaces';
 import {
   DEFAULT_CHANNEL_SPACE,
+  type DailyQuotaUsage,
   type ChannelPreference,
   type ChannelPreferenceStore,
 } from './types';
@@ -16,8 +17,20 @@ export interface DriveChannelData {
   channelIds?: string[];
   channels?: ChannelPreference[];
   spaces?: string[];
+  quota?: DailyQuotaUsage;
   updatedAt: string; // ISO
 }
+
+export interface DriveSyncState extends ChannelPreferenceStore {
+  quota: DailyQuotaUsage;
+  updatedAt: string;
+}
+
+export interface DriveWriteState extends ChannelPreferenceStore {
+  quota?: DailyQuotaUsage | null;
+}
+
+const DEFAULT_QUOTA_RESET_TIMEZONE = process.env.YOUTUBE_QUOTA_RESET_TIMEZONE?.trim() || 'Asia/Kolkata';
 
 function dedupeSpaces(spaces: string[]): string[] {
   const seen = new Set<string>();
@@ -47,7 +60,45 @@ function dedupeChannels(channels: ChannelPreference[]): ChannelPreference[] {
   return out;
 }
 
-function normalizeDriveStore(data: DriveChannelData | null): (ChannelPreferenceStore & { updatedAt: string }) | null {
+function safeQuotaDate(now = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: DEFAULT_QUOTA_RESET_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
+  }
+}
+
+export function getQuotaResetTimezone(): string {
+  return DEFAULT_QUOTA_RESET_TIMEZONE;
+}
+
+export function normalizeQuotaUsage(quota?: DailyQuotaUsage | null, now = new Date()): DailyQuotaUsage {
+  const today = safeQuotaDate(now);
+  if (!quota || quota.date !== today) {
+    return {
+      date: today,
+      used: 0,
+      updatedAt: now.toISOString(),
+    };
+  }
+
+  return {
+    date: today,
+    used: Math.max(0, Math.floor(quota.used || 0)),
+    updatedAt: quota.updatedAt || now.toISOString(),
+  };
+}
+
+function normalizeDriveStore(data: DriveChannelData | null): DriveSyncState | null {
   if (!data) return null;
 
   const channels = Array.isArray(data.channels)
@@ -63,6 +114,7 @@ function normalizeDriveStore(data: DriveChannelData | null): (ChannelPreferenceS
   return {
     channels: normalizedChannels,
     spaces,
+    quota: normalizeQuotaUsage(data.quota),
     updatedAt: data.updatedAt ?? new Date(0).toISOString(),
   };
 }
@@ -79,7 +131,7 @@ async function findFile(accessToken: string): Promise<string | null> {
 
 export async function readDriveChannels(
   accessToken: string,
-): Promise<(ChannelPreferenceStore & { updatedAt: string }) | null> {
+): Promise<DriveSyncState | null> {
   const fileId = await findFile(accessToken);
   if (!fileId) return null;
 
@@ -100,17 +152,19 @@ export async function deleteDriveChannels(accessToken: string): Promise<void> {
   });
 }
 
-export async function writeDriveChannels(accessToken: string, store: ChannelPreferenceStore): Promise<void> {
+export async function writeDriveChannels(accessToken: string, store: DriveWriteState): Promise<void> {
   const normalizedChannels = dedupeChannels(store.channels);
   const normalizedSpaces = dedupeSpaces([
     DEFAULT_CHANNEL_SPACE,
     ...store.spaces,
     ...normalizedChannels.map((channel) => channel.space),
   ]);
+  const normalizedQuota = normalizeQuotaUsage(store.quota);
   const body: DriveChannelData = {
     channels: normalizedChannels,
     channelIds: normalizedChannels.map((channel) => channel.id),
     spaces: normalizedSpaces,
+    quota: normalizedQuota,
     updatedAt: new Date().toISOString(),
   };
   const json = JSON.stringify(body);
@@ -149,4 +203,30 @@ export async function writeDriveChannels(accessToken: string, store: ChannelPref
       body: multipart,
     });
   }
+}
+
+export async function recordDriveQuotaUsage(
+  accessToken: string,
+  units: number,
+  fallbackStore: ChannelPreferenceStore = { channels: [], spaces: [DEFAULT_CHANNEL_SPACE] },
+): Promise<DailyQuotaUsage> {
+  const normalizedUnits = Math.max(0, Math.ceil(units));
+  const existing = await readDriveChannels(accessToken);
+  const baseStore: ChannelPreferenceStore = existing
+    ? { channels: existing.channels, spaces: existing.spaces }
+    : fallbackStore;
+  const quota = normalizeQuotaUsage(existing?.quota);
+  const nextQuota: DailyQuotaUsage = {
+    ...quota,
+    used: quota.used + normalizedUnits,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeDriveChannels(accessToken, {
+    channels: baseStore.channels,
+    spaces: baseStore.spaces,
+    quota: nextQuota,
+  });
+
+  return nextQuota;
 }

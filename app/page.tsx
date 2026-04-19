@@ -3,11 +3,12 @@ import { EmptyState } from '@/components/EmptyState';
 import { MediaTypeFilter } from '@/components/MediaTypeFilter';
 import { MixedFeedClient } from '@/components/MixedFeedClient';
 import { TimeFilter } from '@/components/TimeFilter';
+import { getCookieChannelStore } from '@/lib/channels-cookie';
 import { parseMediaFilter } from '@/lib/media';
 import { getRequestTime } from '@/lib/render';
 import { getSession } from '@/lib/session';
 import { parseRange } from '@/lib/time';
-import { getMixedFeed } from '@/lib/youtube';
+import { getMixedFeedWithQuota, trackYouTubeQuotaUsage } from '@/lib/youtube';
 import { getWhitelistedChannelIds } from '@/lib/whitelist';
 
 export const dynamic = 'force-dynamic';
@@ -72,7 +73,17 @@ async function Feed({
 
   let videos;
   try {
-    videos = await getMixedFeed(range, media, 10, now);
+    const result = await getMixedFeedWithQuota(range, media, 10, now);
+    videos = result.videos;
+
+    if (session.accessToken) {
+      try {
+        const cookieStore = await getCookieChannelStore();
+        await trackYouTubeQuotaUsage(session.accessToken, result.quota, cookieStore);
+      } catch {
+        // Don't block the feed if quota persistence fails.
+      }
+    }
   } catch (error) {
     return <EmptyState emoji="!" title="Couldn't load feed" description={(error as Error).message} />;
   }
