@@ -1,7 +1,9 @@
 import { readDriveChannels, writeDriveChannels } from '@/lib/drive';
 import {
+  getCookieChannelSyncMeta,
   getCookieChannelStore,
   hasDriveSyncHydrated,
+  markCookieChannelStoreSynced,
   markDriveSyncHydrated,
   setCookieChannelStore,
 } from '@/lib/channels-cookie';
@@ -18,10 +20,12 @@ export async function GET() {
 
   let cookieStore: ChannelPreferenceStore = { channels: [], spaces: [] };
   let driveData = null;
+  let localMeta = { updatedAt: null as string | null, dirty: false };
   try {
-    [cookieStore, driveData] = await Promise.all([
+    [cookieStore, driveData, localMeta] = await Promise.all([
       getCookieChannelStore(),
       readDriveChannels(session.accessToken),
+      getCookieChannelSyncMeta(),
     ]);
   } catch {
     return Response.json({ error: 'Failed to read Drive sync state' }, { status: 502 });
@@ -44,7 +48,7 @@ export async function GET() {
     driveIds: driveChannels.map((channel) => channel.id),
     cookieIds: cookieStore.channels.map((channel) => channel.id),
     initialized: await hasDriveSyncHydrated(),
-    synced: syncedChannels && syncedSpaces,
+    synced: syncedChannels && syncedSpaces && !localMeta.dirty,
     updatedAt: driveData?.updatedAt ?? null,
   });
 }
@@ -57,6 +61,7 @@ export async function POST() {
   }
 
   const cookieStore = await getCookieChannelStore();
+  const localMeta = await getCookieChannelSyncMeta();
   const envIds = getEnvChannelIds();
   const cookieOnly = cookieStore.channels.filter((channel) => !envIds.includes(channel.id));
   const localSpaces = cookieStore.spaces;
@@ -64,7 +69,7 @@ export async function POST() {
   try {
     const driveData = await readDriveChannels(session.accessToken);
 
-    if (driveData) {
+    if (driveData && !localMeta.dirty) {
       const driveOnly = driveData.channels.filter((channel) => !envIds.includes(channel.id));
       const replacedLocal =
         cookieOnly.length !== driveOnly.length ||
@@ -78,12 +83,8 @@ export async function POST() {
         channels: driveOnly,
         spaces: driveData.spaces,
       });
+      await markCookieChannelStoreSynced(driveData.updatedAt);
       await markDriveSyncHydrated();
-      await writeDriveChannels(session.accessToken, {
-        channels: driveOnly,
-        spaces: driveData.spaces,
-        quota: driveData.quota,
-      });
 
       return Response.json({
         ok: true,
@@ -97,7 +98,9 @@ export async function POST() {
     await writeDriveChannels(session.accessToken, {
       channels: cookieOnly,
       spaces: localSpaces,
+      quota: driveData?.quota,
     });
+    await markCookieChannelStoreSynced();
     await markDriveSyncHydrated();
   } catch {
     return Response.json({ error: 'Failed to write Drive sync state' }, { status: 502 });
@@ -135,6 +138,7 @@ export async function PUT() {
     channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
     spaces: driveData.spaces,
   });
+  await markCookieChannelStoreSynced(driveData.updatedAt);
   await markDriveSyncHydrated();
   return Response.json({ ok: true, initialized: true, channelIds: driveData.channels.map((channel) => channel.id) });
 }

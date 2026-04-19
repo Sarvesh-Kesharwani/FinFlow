@@ -95,7 +95,7 @@ export function SyncButton() {
   // Poll every 30s
   useEffect(() => {
     if (state === 'no-auth') return;
-    const id = setInterval(() => void pushSync(true), 30_000);
+    const id = setInterval(() => void checkSync(), 30_000);
     return () => clearInterval(id);
   }, [state]);
 

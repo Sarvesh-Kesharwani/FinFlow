@@ -4,6 +4,8 @@ import { DEFAULT_CHANNEL_SPACE, type ChannelPreference, type ChannelPreferenceSt
 
 const COOKIE = 'tubeo_channels';
 const DRIVE_READY_COOKIE = 'tubeo_drive_ready';
+const LOCAL_UPDATED_COOKIE = 'tubeo_channels_updated_at';
+const LOCAL_DIRTY_COOKIE = 'tubeo_channels_dirty';
 const MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
 function dedupeSpaces(spaces: string[]): string[] {
@@ -132,6 +134,42 @@ export async function markDriveSyncHydrated(): Promise<void> {
   });
 }
 
+export async function getCookieChannelSyncMeta(): Promise<{ updatedAt: string | null; dirty: boolean }> {
+  const jar = await cookies();
+  return {
+    updatedAt: jar.get(LOCAL_UPDATED_COOKIE)?.value ?? null,
+    dirty: jar.get(LOCAL_DIRTY_COOKIE)?.value === '1',
+  };
+}
+
+export async function markCookieChannelStoreDirty(updatedAt = new Date().toISOString()): Promise<void> {
+  const jar = await cookies();
+  jar.set(LOCAL_UPDATED_COOKIE, updatedAt, {
+    maxAge: MAX_AGE,
+    path: '/',
+    sameSite: 'lax',
+  });
+  jar.set(LOCAL_DIRTY_COOKIE, '1', {
+    maxAge: MAX_AGE,
+    path: '/',
+    sameSite: 'lax',
+  });
+}
+
+export async function markCookieChannelStoreSynced(updatedAt = new Date().toISOString()): Promise<void> {
+  const jar = await cookies();
+  jar.set(LOCAL_UPDATED_COOKIE, updatedAt, {
+    maxAge: MAX_AGE,
+    path: '/',
+    sameSite: 'lax',
+  });
+  jar.set(LOCAL_DIRTY_COOKIE, '0', {
+    maxAge: MAX_AGE,
+    path: '/',
+    sameSite: 'lax',
+  });
+}
+
 export async function setCookieChannelPreferences(channels: ChannelPreference[]): Promise<void> {
   const existing = await getCookieChannelStore();
   await setCookieChannelStore({ channels, spaces: existing.spaces });
@@ -146,4 +184,6 @@ export async function clearCookieChannelIds(): Promise<void> {
   const jar = await cookies();
   jar.delete(COOKIE);
   jar.delete(DRIVE_READY_COOKIE);
+  jar.delete(LOCAL_UPDATED_COOKIE);
+  jar.delete(LOCAL_DIRTY_COOKIE);
 }

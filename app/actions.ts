@@ -3,9 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import {
   getCookieChannelIds,
+  getCookieChannelSyncMeta,
   getCookieChannelStore,
   getCookieChannelPreferences,
   hasDriveSyncHydrated,
+  markCookieChannelStoreDirty,
+  markCookieChannelStoreSynced,
   markDriveSyncHydrated,
   setCookieChannelStore,
   setCookieChannelSpaces,
@@ -31,12 +34,16 @@ async function hydrateCookieStoreFromDriveIfNeeded(): Promise<void> {
   if (await hasDriveSyncHydrated()) return;
 
   const driveData = await readDriveChannels(session.accessToken);
+  const localMeta = await getCookieChannelSyncMeta();
   if (driveData) {
     const envIds = getEnvChannelIds();
     await setCookieChannelStore({
       channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
       spaces: driveData.spaces,
     });
+    await markCookieChannelStoreSynced(driveData.updatedAt);
+  } else if (localMeta.updatedAt) {
+    await markCookieChannelStoreSynced(localMeta.updatedAt);
   }
 
   await markDriveSyncHydrated();
@@ -101,6 +108,7 @@ export async function addChannelAction(
 
   const channels = await getCookieChannelPreferences();
   await setCookieChannelPreferences([...channels, { id: channelId, space: DEFAULT_CHANNEL_SPACE }]);
+  await markCookieChannelStoreDirty();
   revalidatePath('/');
   revalidatePath('/channels');
   revalidatePath('/settings');
@@ -111,6 +119,7 @@ export async function removeChannelAction(channelId: string): Promise<void> {
   await hydrateCookieStoreFromDriveIfNeeded();
   const existing = await getCookieChannelPreferences();
   await setCookieChannelPreferences(existing.filter((channel) => channel.id !== channelId));
+  await markCookieChannelStoreDirty();
   revalidatePath('/');
   revalidatePath('/channels');
   revalidatePath('/settings');
@@ -131,6 +140,7 @@ export async function updateChannelSpaceAction(channelId: string, nextSpace: str
     await setCookieChannelPreferences(updated);
   }
   await setCookieChannelSpaces([...store.spaces, normalizedSpace]);
+  await markCookieChannelStoreDirty();
 
   revalidatePath('/channels');
   revalidatePath('/settings');
@@ -149,6 +159,7 @@ export async function createChannelSpaceAction(
   }
 
   await setCookieChannelSpaces([...store.spaces, nextSpace]);
+  await markCookieChannelStoreDirty();
   revalidatePath('/channels');
   revalidatePath('/settings');
   return { success: nextSpace };
@@ -185,6 +196,7 @@ export async function renameChannelSpaceAction(
     ),
     spaces: store.spaces.map((space) => (space === existingSpace ? renamedSpace : space)),
   });
+  await markCookieChannelStoreDirty();
 
   revalidatePath('/channels');
   revalidatePath('/settings');
@@ -210,6 +222,7 @@ export async function deleteChannelSpaceAction(spaceToDelete: string): Promise<{
     ),
     spaces: store.spaces.filter((space) => space !== targetSpace),
   });
+  await markCookieChannelStoreDirty();
 
   revalidatePath('/channels');
   revalidatePath('/settings');
