@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { deleteChannelSpaceAction, renameChannelSpaceAction } from '@/app/actions';
 import { normalizeSpaceName } from '@/lib/spaces';
 import { DEFAULT_CHANNEL_SPACE } from '@/lib/types';
 
@@ -37,9 +36,14 @@ export function SpaceSettingsRow({ space }: { space: string }) {
     setError('');
 
     startTransition(() => {
-      void renameChannelSpaceAction(space, draft).then((result) => {
-        if (result.error) {
-          setError(result.error);
+      void fetch('/api/settings/mutate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'renameSpace', currentSpace: space, nextSpace: draft }),
+      }).then(async (response) => {
+        const result = await response.json();
+        if (!response.ok || !result.ok) {
+          setError(result.error ?? 'Failed to rename space.');
           return;
         }
 
@@ -60,9 +64,14 @@ export function SpaceSettingsRow({ space }: { space: string }) {
     setError('');
 
     startTransition(() => {
-      void deleteChannelSpaceAction(space).then((result) => {
-        if (result.error) {
-          setError(result.error);
+      void fetch('/api/settings/mutate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'deleteSpace', space }),
+      }).then(async (response) => {
+        const result = await response.json();
+        if (!response.ok || !result.ok) {
+          setError(result.error ?? 'Failed to delete space.');
           return;
         }
 

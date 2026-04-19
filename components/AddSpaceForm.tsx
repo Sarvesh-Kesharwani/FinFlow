@@ -1,16 +1,15 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createChannelSpaceAction } from '@/app/actions';
 
-const initial: { error?: string; success?: string } = {};
 const CHANNELS_CHANGED_EVENT = 'tubeo-channels-changed';
 
 export function AddSpaceForm() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [state, dispatch, pending] = useActionState(createChannelSpaceAction, initial);
+  const [pending, setPending] = useState(false);
+  const [state, setState] = useState<{ error?: string; success?: string }>({});
 
   useEffect(() => {
     if (!state.success) return;
@@ -20,8 +19,38 @@ export function AddSpaceForm() {
     window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT, { detail: { autoSync: true } }));
   }, [router, state.success]);
 
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const space = inputRef.current?.value?.trim() ?? '';
+    if (!space) {
+      setState({ error: 'Please enter a space name.' });
+      return;
+    }
+
+    setPending(true);
+    setState({});
+    try {
+      const response = await fetch('/api/settings/mutate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'createSpace', space }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setState({ error: data.error ?? 'Failed to create space.' });
+        return;
+      }
+
+      setState({ success: String(data.success ?? '') });
+    } catch {
+      setState({ error: 'Failed to create space.' });
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
-    <form action={dispatch} className="flex flex-col gap-3">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <div className="flex gap-2">
         <input
           ref={inputRef}

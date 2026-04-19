@@ -3,7 +3,6 @@
 import Image from 'next/image';
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { removeChannelAction, updateChannelSpaceAction } from '@/app/actions';
 import { DEFAULT_CHANNEL_SPACE } from '@/lib/types';
 
 interface Props {
@@ -31,7 +30,13 @@ export function ChannelSettingsRow({ id, title, thumbnail, fromEnv, currentSpace
 
   function handleRemove() {
     startTransition(() => {
-      void removeChannelAction(id).then(() => {
+      void fetch('/api/settings/mutate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'removeChannel', channelId: id }),
+      }).then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !data.ok) return;
         router.refresh();
         window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT, { detail: { autoSync: true } }));
       });
@@ -41,7 +46,13 @@ export function ChannelSettingsRow({ id, title, thumbnail, fromEnv, currentSpace
   function handleMove() {
     const nextSpace = selectedSpace === CREATE_NEW_SPACE ? customSpace : selectedSpace;
     startTransition(() => {
-      void updateChannelSpaceAction(id, nextSpace).then(() => {
+      void fetch('/api/settings/mutate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'moveChannel', channelId: id, nextSpace }),
+      }).then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !data.ok) return;
         router.refresh();
         window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT, { detail: { autoSync: true } }));
       });
