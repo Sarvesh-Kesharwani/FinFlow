@@ -1,59 +1,72 @@
 import { readDriveChannels, writeDriveChannels } from '@/lib/drive';
-import { getCookieChannelIds, setCookieChannelIds } from '@/lib/channels-cookie';
+import { getCookieChannelStore, setCookieChannelStore } from '@/lib/channels-cookie';
 import { getSession } from '@/lib/session';
+import type { ChannelPreferenceStore } from '@/lib/types';
 import { getEnvChannelIds } from '@/lib/whitelist';
 
-// GET — read Drive, return { driveIds, cookieIds, synced }
+// GET - read Drive, return { driveIds, cookieIds, synced }
 export async function GET() {
   const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  let cookieIds: string[] = [];
+  let cookieStore: ChannelPreferenceStore = { channels: [], spaces: [] };
   let driveData = null;
   try {
-    [cookieIds, driveData] = await Promise.all([
-      getCookieChannelIds(),
+    [cookieStore, driveData] = await Promise.all([
+      getCookieChannelStore(),
       readDriveChannels(session.accessToken),
     ]);
   } catch {
     return Response.json({ error: 'Failed to read Drive sync state' }, { status: 502 });
   }
 
-  const driveIds = driveData?.channelIds ?? [];
+  const driveChannels = driveData?.channels ?? [];
+  const driveSpaces = driveData?.spaces ?? [];
   const envIds = getEnvChannelIds();
+  const cookieOnly = cookieStore.channels.filter((channel) => !envIds.includes(channel.id));
+  const syncedChannels =
+    cookieOnly.length === driveChannels.length &&
+    cookieOnly.every((channel, index) =>
+      driveChannels[index]?.id === channel.id && driveChannels[index]?.space === channel.space,
+    );
+  const syncedSpaces =
+    cookieStore.spaces.length === driveSpaces.length &&
+    cookieStore.spaces.every((space, index) => driveSpaces[index] === space);
 
-  // Synced = cookie channels (excluding env) match Drive exactly
-  const cookieOnly = cookieIds.filter((id) => !envIds.includes(id));
-  const synced =
-    cookieOnly.length === driveIds.length &&
-    cookieOnly.every((id) => driveIds.includes(id));
-
-  return Response.json({ driveIds, cookieIds, synced, updatedAt: driveData?.updatedAt ?? null });
+  return Response.json({
+    driveIds: driveChannels.map((channel) => channel.id),
+    cookieIds: cookieStore.channels.map((channel) => channel.id),
+    synced: syncedChannels && syncedSpaces,
+    updatedAt: driveData?.updatedAt ?? null,
+  });
 }
 
-// POST /api/drive/sync — push local cookie channels to Drive (manual sync by user)
+// POST /api/drive/sync - push local cookie channels to Drive (manual sync by user)
 export async function POST() {
   const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  const [cookieIds] = await Promise.all([getCookieChannelIds()]);
+  const cookieStore = await getCookieChannelStore();
   const envIds = getEnvChannelIds();
-  const cookieOnly = cookieIds.filter((id) => !envIds.includes(id));
+  const cookieOnly = cookieStore.channels.filter((channel) => !envIds.includes(channel.id));
 
   try {
-    await writeDriveChannels(session.accessToken, cookieOnly);
+    await writeDriveChannels(session.accessToken, {
+      channels: cookieOnly,
+      spaces: cookieStore.spaces,
+    });
   } catch {
     return Response.json({ error: 'Failed to write Drive sync state' }, { status: 502 });
   }
 
-  return Response.json({ ok: true, channelIds: cookieOnly });
+  return Response.json({ ok: true, channelIds: cookieOnly.map((channel) => channel.id) });
 }
 
-// PUT /api/drive/sync — pull Drive channels into cookie (called on login, Drive wins)
+// PUT /api/drive/sync - pull Drive channels into cookie (called on login, Drive wins)
 export async function PUT() {
   const session = await getSession();
   if (!session?.accessToken) {
@@ -70,7 +83,9 @@ export async function PUT() {
   if (!driveData) return Response.json({ ok: true, channelIds: [] });
 
   const envIds = getEnvChannelIds();
-  // Drive fully replaces local — Drive is source of truth on login
-  await setCookieChannelIds(driveData.channelIds.filter((id) => !envIds.includes(id)));
-  return Response.json({ ok: true, channelIds: driveData.channelIds });
+  await setCookieChannelStore({
+    channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
+    spaces: driveData.spaces,
+  });
+  return Response.json({ ok: true, channelIds: driveData.channels.map((channel) => channel.id) });
 }

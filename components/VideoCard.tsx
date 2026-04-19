@@ -29,6 +29,9 @@ export function VideoCard({
             className="object-cover"
           />
         )}
+        <div className="absolute left-2 top-2 rounded-full bg-duo-ink/85 px-2 py-1 text-[11px] font-black uppercase tracking-wide text-white">
+          {video.isShort ? 'Short' : 'Video'}
+        </div>
       </div>
 
       <div className="p-3 flex gap-3">

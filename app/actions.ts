@@ -1,7 +1,16 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getCookieChannelIds, setCookieChannelIds } from '@/lib/channels-cookie';
+import {
+  getCookieChannelIds,
+  getCookieChannelStore,
+  getCookieChannelPreferences,
+  setCookieChannelStore,
+  setCookieChannelSpaces,
+  setCookieChannelPreferences,
+} from '@/lib/channels-cookie';
+import { normalizeSpaceName } from '@/lib/spaces';
+import { DEFAULT_CHANNEL_SPACE } from '@/lib/types';
 
 const API = 'https://www.googleapis.com/youtube/v3';
 
@@ -14,19 +23,15 @@ function apiKey(): string {
 // Extract a handle or channel ID from any YouTube channel URL.
 function parseInput(raw: string): { type: 'id'; value: string } | { type: 'handle'; value: string } | null {
   const s = raw.trim();
-  // Already a bare UC... ID
   if (/^UC[\w-]{22}$/.test(s)) return { type: 'id', value: s };
 
   try {
     const url = new URL(s.startsWith('http') ? s : `https://${s}`);
     const parts = url.pathname.split('/').filter(Boolean);
-    // /channel/UCxxx
     if (parts[0] === 'channel' && parts[1]?.startsWith('UC')) return { type: 'id', value: parts[1] };
-    // /@handle or /c/name or /user/name
     const handle = parts[0]?.startsWith('@') ? parts[0] : parts[1]?.startsWith('@') ? parts[1] : parts[0];
     if (handle) return { type: 'handle', value: handle.replace(/^@/, '') };
   } catch {
-    // Not a URL — treat as bare handle
     if (s) return { type: 'handle', value: s.replace(/^@/, '') };
   }
   return null;
@@ -38,7 +43,6 @@ async function resolveToChannelId(raw: string): Promise<string> {
 
   if (parsed.type === 'id') return parsed.value;
 
-  // Resolve handle via search API
   const qs = new URLSearchParams({
     part: 'snippet',
     type: 'channel',
@@ -71,7 +75,8 @@ export async function addChannelAction(
   const existing = await getCookieChannelIds();
   if (existing.includes(channelId)) return { error: 'Channel already added.' };
 
-  await setCookieChannelIds([...existing, channelId]);
+  const channels = await getCookieChannelPreferences();
+  await setCookieChannelPreferences([...channels, { id: channelId, space: DEFAULT_CHANNEL_SPACE }]);
   revalidatePath('/');
   revalidatePath('/channels');
   revalidatePath('/settings');
@@ -79,9 +84,105 @@ export async function addChannelAction(
 }
 
 export async function removeChannelAction(channelId: string): Promise<void> {
-  const existing = await getCookieChannelIds();
-  await setCookieChannelIds(existing.filter((id) => id !== channelId));
+  const existing = await getCookieChannelPreferences();
+  await setCookieChannelPreferences(existing.filter((channel) => channel.id !== channelId));
   revalidatePath('/');
   revalidatePath('/channels');
   revalidatePath('/settings');
+}
+
+export async function updateChannelSpaceAction(channelId: string, nextSpace: string): Promise<void> {
+  const store = await getCookieChannelStore();
+  const existing = store.channels;
+  const normalizedSpace = normalizeSpaceName(nextSpace);
+  const index = existing.findIndex((channel) => channel.id === channelId);
+
+  if (index === -1) {
+    await setCookieChannelPreferences([...existing, { id: channelId, space: normalizedSpace }]);
+  } else {
+    const updated = [...existing];
+    updated[index] = { ...updated[index], space: normalizedSpace };
+    await setCookieChannelPreferences(updated);
+  }
+  await setCookieChannelSpaces([...store.spaces, normalizedSpace]);
+
+  revalidatePath('/channels');
+  revalidatePath('/settings');
+}
+
+export async function createChannelSpaceAction(
+  _prev: { error?: string; success?: string },
+  formData: FormData,
+): Promise<{ error?: string; success?: string }> {
+  const nextSpace = normalizeSpaceName((formData.get('space') as string | null) ?? '');
+  const store = await getCookieChannelStore();
+
+  if (store.spaces.includes(nextSpace)) {
+    return { error: 'That space already exists.' };
+  }
+
+  await setCookieChannelSpaces([...store.spaces, nextSpace]);
+  revalidatePath('/channels');
+  revalidatePath('/settings');
+  return { success: nextSpace };
+}
+
+export async function renameChannelSpaceAction(
+  currentSpace: string,
+  nextSpace: string,
+): Promise<{ error?: string; success?: string }> {
+  const existingSpace = normalizeSpaceName(currentSpace);
+  const renamedSpace = normalizeSpaceName(nextSpace);
+  const store = await getCookieChannelStore();
+
+  if (existingSpace === DEFAULT_CHANNEL_SPACE) {
+    return { error: `${DEFAULT_CHANNEL_SPACE} is the default space and cannot be renamed.` };
+  }
+
+  if (!store.spaces.includes(existingSpace)) {
+    return { error: 'That space no longer exists.' };
+  }
+
+  if (existingSpace !== renamedSpace && store.spaces.includes(renamedSpace)) {
+    return { error: 'That space already exists.' };
+  }
+
+  if (existingSpace === renamedSpace) {
+    return { success: renamedSpace };
+  }
+
+  await setCookieChannelStore({
+    channels: store.channels.map((channel) =>
+      channel.space === existingSpace ? { ...channel, space: renamedSpace } : channel,
+    ),
+    spaces: store.spaces.map((space) => (space === existingSpace ? renamedSpace : space)),
+  });
+
+  revalidatePath('/channels');
+  revalidatePath('/settings');
+  return { success: renamedSpace };
+}
+
+export async function deleteChannelSpaceAction(spaceToDelete: string): Promise<{ error?: string; success?: string }> {
+  const targetSpace = normalizeSpaceName(spaceToDelete);
+  const store = await getCookieChannelStore();
+
+  if (targetSpace === DEFAULT_CHANNEL_SPACE) {
+    return { error: `${DEFAULT_CHANNEL_SPACE} is the default space and cannot be deleted.` };
+  }
+
+  if (!store.spaces.includes(targetSpace)) {
+    return { error: 'That space no longer exists.' };
+  }
+
+  await setCookieChannelStore({
+    channels: store.channels.map((channel) =>
+      channel.space === targetSpace ? { ...channel, space: DEFAULT_CHANNEL_SPACE } : channel,
+    ),
+    spaces: store.spaces.filter((space) => space !== targetSpace),
+  });
+
+  revalidatePath('/channels');
+  revalidatePath('/settings');
+  return { success: targetSpace };
 }
