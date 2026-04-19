@@ -30,16 +30,23 @@ export function SyncButton() {
     }
   }
 
-  async function pushSync() {
-    setState('syncing');
+  async function pushSync(background = false) {
+    if (!background) {
+      setState('syncing');
+    }
+
     try {
       const r = await fetch('/api/drive/sync', { method: 'POST' });
       if (r.status === 401) { setState('no-auth'); return; }
       if (!r.ok) { setState('unsynced'); return; }
       const data = await r.json();
-      if (data.initialized) {
+      if (data.initialized || data.driveWins || data.seededFromLocal) {
         sessionStorage.setItem(PULLED_KEY, '1');
-        router.refresh();
+        setLastSynced(new Date().toISOString());
+        setState('synced');
+        if (data.replacedLocal || data.seededFromLocal) {
+          router.refresh();
+        }
         await checkSync();
         return;
       }
@@ -88,7 +95,7 @@ export function SyncButton() {
   // Poll every 30s
   useEffect(() => {
     if (state === 'no-auth') return;
-    const id = setInterval(() => void checkSync(), 30_000);
+    const id = setInterval(() => void pushSync(true), 30_000);
     return () => clearInterval(id);
   }, [state]);
 

@@ -11,6 +11,8 @@ import {
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const FILE_NAME = 'tubeo-channels.json';
+const BACKUP_FOLDER_NAME = 'tubeo-backups';
+const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 const SPACE = 'appDataFolder';
 
 export interface DriveChannelData {
@@ -119,27 +121,150 @@ function normalizeDriveStore(data: DriveChannelData | null): DriveSyncState | nu
   };
 }
 
-async function findFile(accessToken: string): Promise<string | null> {
-  const qs = new URLSearchParams({ spaces: SPACE, fields: 'files(id)', q: `name='${FILE_NAME}'` });
+function escapeDriveQueryValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+async function listFiles(
+  accessToken: string,
+  query: string,
+  fields = 'files(id,name,mimeType)',
+): Promise<Array<{ id: string; name?: string; mimeType?: string }>> {
+  const qs = new URLSearchParams({ spaces: SPACE, fields, q: query });
   const res = await fetch(`${DRIVE_API}/files?${qs}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!res.ok) return null;
+  if (!res.ok) return [];
   const data = await res.json();
-  return data.files?.[0]?.id ?? null;
+  return data.files ?? [];
+}
+
+async function findFile(
+  accessToken: string,
+  name = FILE_NAME,
+  parent: string = SPACE,
+  mimeType?: string,
+): Promise<string | null> {
+  const queryParts = [`name='${escapeDriveQueryValue(name)}'`, `'${escapeDriveQueryValue(parent)}' in parents`];
+  if (mimeType) queryParts.push(`mimeType='${escapeDriveQueryValue(mimeType)}'`);
+  const files = await listFiles(accessToken, queryParts.join(' and '), 'files(id)');
+  return files[0]?.id ?? null;
+}
+
+async function readFileJson<T>(accessToken: string, fileId: string): Promise<T | null> {
+  const res = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return null;
+  return res.json() as Promise<T>;
+}
+
+async function readPrimaryDriveData(accessToken: string): Promise<{ id: string; data: DriveChannelData | null } | null> {
+  const fileId = await findFile(accessToken);
+  if (!fileId) return null;
+
+  return {
+    id: fileId,
+    data: await readFileJson<DriveChannelData>(accessToken, fileId),
+  };
+}
+
+async function uploadJsonFile(
+  accessToken: string,
+  name: string,
+  body: string,
+  options?: { fileId?: string; parents?: string[] },
+): Promise<void> {
+  if (options?.fileId) {
+    await fetch(`${UPLOAD_API}/files/${options.fileId}?uploadType=media`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+    return;
+  }
+
+  const metadata = JSON.stringify({ name, parents: options?.parents ?? [SPACE] });
+  const boundary = 'tubeo_boundary';
+  const multipart = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    metadata,
+    `--${boundary}`,
+    'Content-Type: application/json',
+    '',
+    body,
+    `--${boundary}--`,
+  ].join('\r\n');
+
+  await fetch(`${UPLOAD_API}/files?uploadType=multipart`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+    },
+    body: multipart,
+  });
+}
+
+async function ensureBackupFolder(accessToken: string): Promise<string> {
+  const existingId = await findFile(accessToken, BACKUP_FOLDER_NAME, SPACE, FOLDER_MIME_TYPE);
+  if (existingId) return existingId;
+
+  const metadata = JSON.stringify({
+    name: BACKUP_FOLDER_NAME,
+    mimeType: FOLDER_MIME_TYPE,
+    parents: [SPACE],
+  });
+  const res = await fetch(`${DRIVE_API}/files`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: metadata,
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Failed to create backup folder: ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  if (!data.id) throw new Error('Drive backup folder ID missing');
+  return data.id as string;
+}
+
+async function ensureDailyBackup(
+  accessToken: string,
+  existing: { id: string; data: DriveChannelData | null } | null,
+): Promise<void> {
+  const previousDate = existing?.data?.quota?.date?.trim();
+  const today = safeQuotaDate();
+  if (!existing?.data || !previousDate || previousDate === today) return;
+
+  const backupFolderId = await ensureBackupFolder(accessToken);
+  const backupFileName = `tubeo-channels-${previousDate}.json`;
+  const backupExists = await findFile(accessToken, backupFileName, backupFolderId);
+  if (backupExists) return;
+
+  await uploadJsonFile(
+    accessToken,
+    backupFileName,
+    JSON.stringify(existing.data),
+    { parents: [backupFolderId] },
+  );
 }
 
 export async function readDriveChannels(
   accessToken: string,
 ): Promise<DriveSyncState | null> {
-  const fileId = await findFile(accessToken);
-  if (!fileId) return null;
-
-  const res = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) return null;
-  return normalizeDriveStore(await res.json());
+  const existing = await readPrimaryDriveData(accessToken);
+  return normalizeDriveStore(existing?.data ?? null);
 }
 
 export async function deleteDriveChannels(accessToken: string): Promise<void> {
@@ -153,6 +278,9 @@ export async function deleteDriveChannels(accessToken: string): Promise<void> {
 }
 
 export async function writeDriveChannels(accessToken: string, store: DriveWriteState): Promise<void> {
+  const existing = await readPrimaryDriveData(accessToken);
+  await ensureDailyBackup(accessToken, existing);
+
   const normalizedChannels = dedupeChannels(store.channels);
   const normalizedSpaces = dedupeSpaces([
     DEFAULT_CHANNEL_SPACE,
@@ -168,41 +296,7 @@ export async function writeDriveChannels(accessToken: string, store: DriveWriteS
     updatedAt: new Date().toISOString(),
   };
   const json = JSON.stringify(body);
-  const existingId = await findFile(accessToken);
-
-  if (existingId) {
-    await fetch(`${UPLOAD_API}/files/${existingId}?uploadType=media`, {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: json,
-    });
-  } else {
-    const metadata = JSON.stringify({ name: FILE_NAME, parents: [SPACE] });
-    const boundary = 'tubeo_boundary';
-    const multipart = [
-      `--${boundary}`,
-      'Content-Type: application/json; charset=UTF-8',
-      '',
-      metadata,
-      `--${boundary}`,
-      'Content-Type: application/json',
-      '',
-      json,
-      `--${boundary}--`,
-    ].join('\r\n');
-
-    await fetch(`${UPLOAD_API}/files?uploadType=multipart`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body: multipart,
-    });
-  }
+  await uploadJsonFile(accessToken, FILE_NAME, json, { fileId: existing?.id, parents: [SPACE] });
 }
 
 export async function recordDriveQuotaUsage(
