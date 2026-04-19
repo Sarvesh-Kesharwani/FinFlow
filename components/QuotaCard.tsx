@@ -5,7 +5,7 @@ function formatUnits(value: number): string {
 }
 
 export function QuotaCard({ quota }: { quota: QuotaSummary }) {
-  const usedWidth = `${Math.min(100, Math.max(0, quota.estimatedUsedPercent))}%`;
+  const usedWidth = `${Math.min(100, Math.max(0, quota.usedTodayPercent))}%`;
 
   return (
     <section className="card p-5 space-y-4">
@@ -17,7 +17,7 @@ export function QuotaCard({ quota }: { quota: QuotaSummary }) {
         <div className="text-right">
           <p className="text-xs font-black uppercase tracking-[0.2em] text-duo-mute">Remaining</p>
           <p className="mt-1 text-2xl font-extrabold text-duo-greenDark">
-            {formatUnits(quota.estimatedRemaining)}
+            {formatUnits(quota.remainingToday)}
           </p>
           <p className="text-sm font-bold text-duo-mute">of {formatUnits(quota.dailyLimit)}</p>
         </div>
@@ -28,17 +28,22 @@ export function QuotaCard({ quota }: { quota: QuotaSummary }) {
           <div className="h-full rounded-full bg-duo-green transition-[width]" style={{ width: usedWidth }} />
         </div>
         <div className="flex items-center justify-between gap-3 text-sm font-bold text-duo-mute">
-          <span>{formatUnits(quota.estimatedUsed)} used per typical feed refresh</span>
-          <span>{quota.estimatedUsedPercent.toFixed(1)}%</span>
+          <span>{formatUnits(quota.usedToday)} used today</span>
+          <span>{quota.usedTodayPercent.toFixed(1)}%</span>
         </div>
       </div>
 
-      <p className="text-sm text-duo-mute">
-        Estimated for one feed refresh: {quota.channelCalls} `channels.list` unit
-        {quota.channelCalls === 1 ? '' : 's'}, {quota.playlistCalls} `playlistItems.list` unit
-        {quota.playlistCalls === 1 ? '' : 's'}, and {quota.videoDetailCalls} `videos.list` unit
-        {quota.videoDetailCalls === 1 ? '' : 's'}, assuming about 2 playlist pages per channel.
-      </p>
+      <div className="space-y-1 text-sm text-duo-mute">
+        <p>
+          Source: <span className="font-bold text-duo-ink">{quota.sourceLabel}</span>
+          {quota.updatedAt ? ` • Updated ${new Date(quota.updatedAt).toLocaleTimeString()}` : ''}
+        </p>
+        {quota.sourceDetail && <p>{quota.sourceDetail}</p>}
+        <p>
+          Typical Tubeo refresh cost: {formatUnits(quota.refreshCost)} units
+          {' '}({quota.channelCalls} `channels.list`, {quota.playlistCalls} `playlistItems.list`, {quota.videoDetailCalls} `videos.list`)
+        </p>
+      </div>
     </section>
   );
 }

@@ -41,9 +41,14 @@ export interface ChannelWithVideos {
 
 export interface QuotaSummary {
   dailyLimit: number;
-  estimatedUsed: number;
-  estimatedRemaining: number;
-  estimatedUsedPercent: number;
+  usedToday: number;
+  remainingToday: number;
+  usedTodayPercent: number;
+  refreshCost: number;
+  source: 'exact' | 'estimated';
+  sourceLabel: string;
+  sourceDetail?: string;
+  updatedAt?: string;
   channelCalls: number;
   playlistCalls: number;
   videoDetailCalls: number;

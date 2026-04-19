@@ -9,7 +9,7 @@ import {
   getWhitelistedChannelPreferences,
   getWhitelistedChannelSpaces,
 } from '@/lib/whitelist';
-import { getChannels, getEstimatedFeedQuotaSummary } from '@/lib/youtube';
+import { getChannels, getYouTubeQuotaSummary } from '@/lib/youtube';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,7 @@ export default async function SettingsPage() {
   const quotaViewerEmail = (process.env.YOUTUBE_QUOTA_VIEWER_EMAIL ?? '').trim().toLowerCase();
   const canViewQuota =
     !!quotaViewerEmail && session?.user?.email?.trim().toLowerCase() === quotaViewerEmail;
-  const quota = getEstimatedFeedQuotaSummary(allIds.length);
+  const quota = canViewQuota ? await getYouTubeQuotaSummary(allIds.length, session?.accessToken) : null;
 
   let channels: Awaited<ReturnType<typeof getChannels>> = [];
   try {
@@ -65,7 +65,7 @@ export default async function SettingsPage() {
         )}
       </section>
 
-      {canViewQuota && <QuotaCard quota={quota} />}
+      {canViewQuota && quota && <QuotaCard quota={quota} />}
 
       {preferences.length > 0 && (
         <section className="space-y-3">
