@@ -35,7 +35,7 @@ export default async function MixedPage({
 }
 
 async function Feed({ range }: { range: ReturnType<typeof parseRange> }) {
-  if (getWhitelistedChannelIds().length === 0) {
+  if ((await getWhitelistedChannelIds()).length === 0) {
     return (
       <EmptyState
         emoji="📭"

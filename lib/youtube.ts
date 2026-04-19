@@ -35,7 +35,8 @@ interface YTChannelListResp {
   }>;
 }
 
-export async function getChannels(ids: string[] = getWhitelistedChannelIds()): Promise<Channel[]> {
+export async function getChannels(ids?: string[]): Promise<Channel[]> {
+  if (!ids) ids = await getWhitelistedChannelIds();
   if (ids.length === 0) return [];
   // API accepts up to 50 ids per call.
   const chunks: string[][] = [];
