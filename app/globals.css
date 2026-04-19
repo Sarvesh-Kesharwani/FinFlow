@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    @apply bg-duo-bg text-duo-ink font-display antialiased;
+  }
+  button { @apply select-none; }
+}
+
+@layer components {
+  .btn-duo {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-chonk font-bold uppercase tracking-wide text-sm transition-transform active:translate-y-[2px] active:shadow-none;
+  }
+  .btn-duo-green  { @apply btn-duo bg-duo-green text-white shadow-duoGreen hover:brightness-105; }
+  .btn-duo-blue   { @apply btn-duo bg-duo-blue  text-white shadow-duoBlue  hover:brightness-105; }
+  .btn-duo-ghost  { @apply btn-duo bg-white text-duo-ink border-2 border-duo-border shadow-card hover:bg-duo-soft; }
+
+  .chip {
+    @apply inline-flex items-center gap-1 px-3 py-1.5 rounded-full border-2 border-duo-border bg-white text-sm font-bold text-duo-ink hover:bg-duo-soft cursor-pointer;
+  }
+  .chip-active {
+    @apply bg-duo-green/10 border-duo-green text-duo-greenDark;
+  }
+
+  .card {
+    @apply bg-white rounded-chonk border-2 border-duo-border shadow-card overflow-hidden;
+  }
+}
