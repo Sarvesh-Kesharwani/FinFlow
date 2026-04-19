@@ -3,6 +3,7 @@ import { normalizeSpaceName } from './spaces';
 import { DEFAULT_CHANNEL_SPACE, type ChannelPreference, type ChannelPreferenceStore } from './types';
 
 const COOKIE = 'tubeo_channels';
+const DRIVE_READY_COOKIE = 'tubeo_drive_ready';
 const MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
 function dedupeSpaces(spaces: string[]): string[] {
@@ -117,6 +118,20 @@ export async function setCookieChannelStore(store: ChannelPreferenceStore): Prom
   });
 }
 
+export async function hasDriveSyncHydrated(): Promise<boolean> {
+  const jar = await cookies();
+  return jar.get(DRIVE_READY_COOKIE)?.value === '1';
+}
+
+export async function markDriveSyncHydrated(): Promise<void> {
+  const jar = await cookies();
+  jar.set(DRIVE_READY_COOKIE, '1', {
+    maxAge: MAX_AGE,
+    path: '/',
+    sameSite: 'lax',
+  });
+}
+
 export async function setCookieChannelPreferences(channels: ChannelPreference[]): Promise<void> {
   const existing = await getCookieChannelStore();
   await setCookieChannelStore({ channels, spaces: existing.spaces });
@@ -130,4 +145,5 @@ export async function setCookieChannelSpaces(spaces: string[]): Promise<void> {
 export async function clearCookieChannelIds(): Promise<void> {
   const jar = await cookies();
   jar.delete(COOKIE);
+  jar.delete(DRIVE_READY_COOKIE);
 }

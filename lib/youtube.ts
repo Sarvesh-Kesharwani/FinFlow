@@ -3,6 +3,7 @@
 
 import 'server-only';
 import { cache } from 'react';
+import { hasDriveSyncHydrated } from './channels-cookie';
 import { getQuotaResetTimezone, readDriveChannels, recordDriveQuotaUsage } from './drive';
 import { matchesMediaFilter } from './media';
 import { getRequestTime } from './render';
@@ -248,6 +249,7 @@ export async function trackYouTubeQuotaUsage(
   fallbackStore?: ChannelPreferenceStore,
 ): Promise<void> {
   if (!accessToken) return;
+  if (!(await hasDriveSyncHydrated())) return;
 
   const units = typeof quota === 'number' ? quota : quota.refreshCost;
   if (units <= 0) return;

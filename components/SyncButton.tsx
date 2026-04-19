@@ -36,6 +36,13 @@ export function SyncButton() {
       const r = await fetch('/api/drive/sync', { method: 'POST' });
       if (r.status === 401) { setState('no-auth'); return; }
       if (!r.ok) { setState('unsynced'); return; }
+      const data = await r.json();
+      if (data.initialized) {
+        sessionStorage.setItem(PULLED_KEY, '1');
+        router.refresh();
+        await checkSync();
+        return;
+      }
       setLastSynced(new Date().toISOString());
       setState('synced');
     } catch {

@@ -5,12 +5,17 @@ import {
   getCookieChannelIds,
   getCookieChannelStore,
   getCookieChannelPreferences,
+  hasDriveSyncHydrated,
+  markDriveSyncHydrated,
   setCookieChannelStore,
   setCookieChannelSpaces,
   setCookieChannelPreferences,
 } from '@/lib/channels-cookie';
+import { readDriveChannels } from '@/lib/drive';
+import { getSession } from '@/lib/session';
 import { normalizeSpaceName } from '@/lib/spaces';
 import { DEFAULT_CHANNEL_SPACE } from '@/lib/types';
+import { getEnvChannelIds } from '@/lib/whitelist';
 
 const API = 'https://www.googleapis.com/youtube/v3';
 
@@ -18,6 +23,23 @@ function apiKey(): string {
   const k = process.env.YOUTUBE_API_KEY;
   if (!k) throw new Error('YOUTUBE_API_KEY missing');
   return k;
+}
+
+async function hydrateCookieStoreFromDriveIfNeeded(): Promise<void> {
+  const session = await getSession();
+  if (!session?.accessToken) return;
+  if (await hasDriveSyncHydrated()) return;
+
+  const driveData = await readDriveChannels(session.accessToken);
+  if (driveData) {
+    const envIds = getEnvChannelIds();
+    await setCookieChannelStore({
+      channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
+      spaces: driveData.spaces,
+    });
+  }
+
+  await markDriveSyncHydrated();
 }
 
 // Extract a handle or channel ID from any YouTube channel URL.
@@ -62,6 +84,8 @@ export async function addChannelAction(
   _prev: { error?: string; success?: string },
   formData: FormData,
 ): Promise<{ error?: string; success?: string }> {
+  await hydrateCookieStoreFromDriveIfNeeded();
+
   const input = (formData.get('url') as string ?? '').trim();
   if (!input) return { error: 'Please enter a channel URL or handle.' };
 
@@ -84,6 +108,7 @@ export async function addChannelAction(
 }
 
 export async function removeChannelAction(channelId: string): Promise<void> {
+  await hydrateCookieStoreFromDriveIfNeeded();
   const existing = await getCookieChannelPreferences();
   await setCookieChannelPreferences(existing.filter((channel) => channel.id !== channelId));
   revalidatePath('/');
@@ -92,6 +117,7 @@ export async function removeChannelAction(channelId: string): Promise<void> {
 }
 
 export async function updateChannelSpaceAction(channelId: string, nextSpace: string): Promise<void> {
+  await hydrateCookieStoreFromDriveIfNeeded();
   const store = await getCookieChannelStore();
   const existing = store.channels;
   const normalizedSpace = normalizeSpaceName(nextSpace);
@@ -114,6 +140,7 @@ export async function createChannelSpaceAction(
   _prev: { error?: string; success?: string },
   formData: FormData,
 ): Promise<{ error?: string; success?: string }> {
+  await hydrateCookieStoreFromDriveIfNeeded();
   const nextSpace = normalizeSpaceName((formData.get('space') as string | null) ?? '');
   const store = await getCookieChannelStore();
 
@@ -131,6 +158,7 @@ export async function renameChannelSpaceAction(
   currentSpace: string,
   nextSpace: string,
 ): Promise<{ error?: string; success?: string }> {
+  await hydrateCookieStoreFromDriveIfNeeded();
   const existingSpace = normalizeSpaceName(currentSpace);
   const renamedSpace = normalizeSpaceName(nextSpace);
   const store = await getCookieChannelStore();
@@ -164,6 +192,7 @@ export async function renameChannelSpaceAction(
 }
 
 export async function deleteChannelSpaceAction(spaceToDelete: string): Promise<{ error?: string; success?: string }> {
+  await hydrateCookieStoreFromDriveIfNeeded();
   const targetSpace = normalizeSpaceName(spaceToDelete);
   const store = await getCookieChannelStore();
 

@@ -1,5 +1,10 @@
 import { readDriveChannels, writeDriveChannels } from '@/lib/drive';
-import { getCookieChannelStore, setCookieChannelStore } from '@/lib/channels-cookie';
+import {
+  getCookieChannelStore,
+  hasDriveSyncHydrated,
+  markDriveSyncHydrated,
+  setCookieChannelStore,
+} from '@/lib/channels-cookie';
 import { getSession } from '@/lib/session';
 import type { ChannelPreferenceStore } from '@/lib/types';
 import { getEnvChannelIds } from '@/lib/whitelist';
@@ -38,6 +43,7 @@ export async function GET() {
   return Response.json({
     driveIds: driveChannels.map((channel) => channel.id),
     cookieIds: cookieStore.channels.map((channel) => channel.id),
+    initialized: await hasDriveSyncHydrated(),
     synced: syncedChannels && syncedSpaces,
     updatedAt: driveData?.updatedAt ?? null,
   });
@@ -56,6 +62,26 @@ export async function POST() {
   const cookieOnly = cookieStore.channels.filter((channel) => !envIds.includes(channel.id));
 
   try {
+    if (!(await hasDriveSyncHydrated())) {
+      driveData = await readDriveChannels(session.accessToken);
+
+      if (driveData) {
+        await setCookieChannelStore({
+          channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
+          spaces: driveData.spaces,
+        });
+        await markDriveSyncHydrated();
+        return Response.json({
+          ok: true,
+          initialized: true,
+          pulledFromDrive: true,
+          channelIds: driveData.channels.map((channel) => channel.id),
+        });
+      }
+
+      await markDriveSyncHydrated();
+    }
+
     driveData = await readDriveChannels(session.accessToken);
     await writeDriveChannels(session.accessToken, {
       channels: cookieOnly,
@@ -83,12 +109,16 @@ export async function PUT() {
     return Response.json({ error: 'Failed to pull channels from Drive' }, { status: 502 });
   }
 
-  if (!driveData) return Response.json({ ok: true, channelIds: [] });
+  if (!driveData) {
+    await markDriveSyncHydrated();
+    return Response.json({ ok: true, initialized: true, channelIds: [] });
+  }
 
   const envIds = getEnvChannelIds();
   await setCookieChannelStore({
     channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
     spaces: driveData.spaces,
   });
-  return Response.json({ ok: true, channelIds: driveData.channels.map((channel) => channel.id) });
+  await markDriveSyncHydrated();
+  return Response.json({ ok: true, initialized: true, channelIds: driveData.channels.map((channel) => channel.id) });
 }
