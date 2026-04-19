@@ -2,6 +2,8 @@ import { Suspense } from 'react';
 import { TimeFilter } from '@/components/TimeFilter';
 import { ChannelRow } from '@/components/ChannelRow';
 import { EmptyState } from '@/components/EmptyState';
+import { getRequestTime } from '@/lib/render';
+import { getSession } from '@/lib/session';
 import { parseRange } from '@/lib/time';
 import { getChannelGroupedFeed } from '@/lib/youtube';
 import { getWhitelistedChannelIds } from '@/lib/whitelist';
@@ -35,6 +37,19 @@ export default async function ChannelsPage({
 }
 
 async function Grouped({ range }: { range: ReturnType<typeof parseRange> }) {
+  const now = getRequestTime();
+  const session = await getSession();
+
+  if (!session?.user) {
+    return (
+      <EmptyState
+        emoji="🔒"
+        title="Sign in to view your channels"
+        description="Tubeo clears your saved feed on logout. Sign in again to load your channels."
+      />
+    );
+  }
+
   if ((await getWhitelistedChannelIds()).length === 0) {
     return (
       <EmptyState
@@ -47,7 +62,7 @@ async function Grouped({ range }: { range: ReturnType<typeof parseRange> }) {
 
   let groups;
   try {
-    groups = await getChannelGroupedFeed(range);
+    groups = await getChannelGroupedFeed(range, 6, now);
   } catch (e) {
     return <EmptyState emoji="⚠️" title="Couldn't load channels" description={(e as Error).message} />;
   }
@@ -59,7 +74,7 @@ async function Grouped({ range }: { range: ReturnType<typeof parseRange> }) {
   return (
     <div className="space-y-8">
       {groups.map((g) => (
-        <ChannelRow key={g.channel.id} data={g} />
+        <ChannelRow key={g.channel.id} data={g} now={now} />
       ))}
     </div>
   );

@@ -2,7 +2,9 @@
 // Exposes: getChannels, getLatestVideosForChannel, getMixedFeed, getChannelGroupedFeed.
 
 import 'server-only';
+import { cache } from 'react';
 import type { Channel, ChannelWithVideos, TimeRange, Video } from './types';
+import { getRequestTime } from './render';
 import { rangeToMs, withinRange } from './time';
 import { getWhitelistedChannelIds } from './whitelist';
 
@@ -84,8 +86,9 @@ export async function getLatestVideosForChannel(
   channel: Channel,
   range: TimeRange,
   max = 20,
+  now = getRequestTime(),
 ): Promise<Video[]> {
-  const cutoff = Date.now() - rangeToMs(range);
+  const cutoff = now - rangeToMs(range);
   const out: Video[] = [];
   let pageToken: string | undefined;
   // Cap pages to avoid quota blowups on big channels.
@@ -119,25 +122,33 @@ export async function getLatestVideosForChannel(
     if (stop || !data.nextPageToken) break;
     pageToken = data.nextPageToken;
   }
-  return out.filter((v) => withinRange(v.publishedAt, range));
+  return out.filter((v) => withinRange(v.publishedAt, range, now));
 }
 
 // --- Aggregate views ---
 
-export async function getChannelGroupedFeed(range: TimeRange, perChannel = 6): Promise<ChannelWithVideos[]> {
+export const getChannelGroupedFeed = cache(async function getChannelGroupedFeed(
+  range: TimeRange,
+  perChannel = 6,
+  now = getRequestTime(),
+): Promise<ChannelWithVideos[]> {
   const channels = await getChannels();
   const results = await Promise.all(
     channels.map(async (ch) => ({
       channel: ch,
-      videos: await getLatestVideosForChannel(ch, range, perChannel),
+      videos: await getLatestVideosForChannel(ch, range, perChannel, now),
     })),
   );
   return results;
-}
+});
 
-export async function getMixedFeed(range: TimeRange, perChannel = 10): Promise<Video[]> {
-  const grouped = await getChannelGroupedFeed(range, perChannel);
+export const getMixedFeed = cache(async function getMixedFeed(
+  range: TimeRange,
+  perChannel = 10,
+  now = getRequestTime(),
+): Promise<Video[]> {
+  const grouped = await getChannelGroupedFeed(range, perChannel, now);
   const all = grouped.flatMap((g) => g.videos);
   all.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   return all;
-}
+});

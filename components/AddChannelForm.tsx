@@ -1,17 +1,24 @@
 'use client';
 
 import { useActionState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { addChannelAction } from '@/app/actions';
 
-const initial = {};
+const initial: { error?: string; success?: string } = {};
+const CHANNELS_CHANGED_EVENT = 'tubeo-channels-changed';
 
 export function AddChannelForm() {
+  const router = useRouter();
   const [state, dispatch, pending] = useActionState(addChannelAction, initial);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (state.success && inputRef.current) inputRef.current.value = '';
-  }, [state.success]);
+    if (!state.success) return;
+
+    if (inputRef.current) inputRef.current.value = '';
+    router.refresh();
+    window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT, { detail: { autoSync: true } }));
+  }, [router, state.success]);
 
   return (
     <form action={dispatch} className="flex flex-col gap-3">

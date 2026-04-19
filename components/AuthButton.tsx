@@ -1,13 +1,16 @@
-import { auth, signIn, signOut } from '@/auth';
+import { signIn, signOut } from '@/auth';
 import Image from 'next/image';
 import { SignOutButton } from '@/components/SignOutButton';
+import { clearCookieChannelIds } from '@/lib/channels-cookie';
+import { getSession } from '@/lib/session';
 
 export async function AuthButton() {
-  const session = await auth();
+  const session = await getSession();
 
   if (session?.user) {
     const signOutAction = async () => {
       'use server';
+      await clearCookieChannelIds();
       await signOut({ redirectTo: '/' });
     };
     return (

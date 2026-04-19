@@ -3,11 +3,15 @@ import 'server-only';
 import { auth } from '@/auth';
 
 export async function getSession() {
-  return auth();
+  try {
+    return await auth();
+  } catch {
+    return null;
+  }
 }
 
 export async function requireSession() {
-  const session = await auth();
+  const session = await getSession();
   if (!session) throw new Error('Not authenticated');
   return session;
 }

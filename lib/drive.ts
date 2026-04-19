@@ -32,6 +32,16 @@ export async function readDriveChannels(accessToken: string): Promise<DriveChann
   return res.json() as Promise<DriveChannelData>;
 }
 
+export async function deleteDriveChannels(accessToken: string): Promise<void> {
+  const fileId = await findFile(accessToken);
+  if (!fileId) return;
+
+  await fetch(`${DRIVE_API}/files/${fileId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
 export async function writeDriveChannels(accessToken: string, channelIds: string[]): Promise<void> {
   const body: DriveChannelData = { channelIds, updatedAt: new Date().toISOString() };
   const json = JSON.stringify(body);

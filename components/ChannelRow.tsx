@@ -2,7 +2,7 @@ import Image from 'next/image';
 import { VideoCard } from './VideoCard';
 import type { ChannelWithVideos } from '@/lib/types';
 
-export function ChannelRow({ data }: { data: ChannelWithVideos }) {
+export function ChannelRow({ data, now }: { data: ChannelWithVideos; now: number }) {
   const { channel, videos } = data;
   return (
     <section className="space-y-3">
@@ -32,7 +32,7 @@ export function ChannelRow({ data }: { data: ChannelWithVideos }) {
         <div className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory -mx-4 px-4">
           {videos.map((v) => (
             <div key={v.id} className="snap-start shrink-0 w-[300px]">
-              <VideoCard video={v} showChannel={false} />
+              <VideoCard video={v} now={now} showChannel={false} />
             </div>
           ))}
         </div>

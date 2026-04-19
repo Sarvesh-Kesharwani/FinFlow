@@ -1,19 +1,25 @@
-import { auth } from '@/auth';
 import { readDriveChannels, writeDriveChannels } from '@/lib/drive';
 import { getCookieChannelIds, setCookieChannelIds } from '@/lib/channels-cookie';
+import { getSession } from '@/lib/session';
 import { getEnvChannelIds } from '@/lib/whitelist';
 
 // GET — read Drive, return { driveIds, cookieIds, synced }
 export async function GET() {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  const [cookieIds, driveData] = await Promise.all([
-    getCookieChannelIds(),
-    readDriveChannels(session.accessToken),
-  ]);
+  let cookieIds: string[] = [];
+  let driveData = null;
+  try {
+    [cookieIds, driveData] = await Promise.all([
+      getCookieChannelIds(),
+      readDriveChannels(session.accessToken),
+    ]);
+  } catch {
+    return Response.json({ error: 'Failed to read Drive sync state' }, { status: 502 });
+  }
 
   const driveIds = driveData?.channelIds ?? [];
   const envIds = getEnvChannelIds();
@@ -29,7 +35,7 @@ export async function GET() {
 
 // POST /api/drive/sync — push local cookie channels to Drive (manual sync by user)
 export async function POST() {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
@@ -38,18 +44,29 @@ export async function POST() {
   const envIds = getEnvChannelIds();
   const cookieOnly = cookieIds.filter((id) => !envIds.includes(id));
 
-  await writeDriveChannels(session.accessToken, cookieOnly);
+  try {
+    await writeDriveChannels(session.accessToken, cookieOnly);
+  } catch {
+    return Response.json({ error: 'Failed to write Drive sync state' }, { status: 502 });
+  }
+
   return Response.json({ ok: true, channelIds: cookieOnly });
 }
 
 // PUT /api/drive/sync — pull Drive channels into cookie (called on login, Drive wins)
 export async function PUT() {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  const driveData = await readDriveChannels(session.accessToken);
+  let driveData = null;
+  try {
+    driveData = await readDriveChannels(session.accessToken);
+  } catch {
+    return Response.json({ error: 'Failed to pull channels from Drive' }, { status: 502 });
+  }
+
   if (!driveData) return Response.json({ ok: true, channelIds: [] });
 
   const envIds = getEnvChannelIds();

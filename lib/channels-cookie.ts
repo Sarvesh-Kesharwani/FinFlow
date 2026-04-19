@@ -13,3 +13,8 @@ export async function setCookieChannelIds(ids: string[]): Promise<void> {
   const jar = await cookies();
   jar.set(COOKIE, ids.join(','), { maxAge: MAX_AGE, path: '/', sameSite: 'lax' });
 }
+
+export async function clearCookieChannelIds(): Promise<void> {
+  const jar = await cookies();
+  jar.delete(COOKIE);
+}

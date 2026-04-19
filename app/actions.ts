@@ -74,6 +74,7 @@ export async function addChannelAction(
   await setCookieChannelIds([...existing, channelId]);
   revalidatePath('/');
   revalidatePath('/channels');
+  revalidatePath('/settings');
   return { success: channelId };
 }
 
@@ -82,4 +83,5 @@ export async function removeChannelAction(channelId: string): Promise<void> {
   await setCookieChannelIds(existing.filter((id) => id !== channelId));
   revalidatePath('/');
   revalidatePath('/channels');
+  revalidatePath('/settings');
 }

@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import { useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { removeChannelAction } from '@/app/actions';
 
 interface Props {
@@ -11,11 +12,19 @@ interface Props {
   fromEnv: boolean;
 }
 
+const CHANNELS_CHANGED_EVENT = 'tubeo-channels-changed';
+
 export function ChannelSettingsRow({ id, title, thumbnail, fromEnv }: Props) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   function handleRemove() {
-    startTransition(() => removeChannelAction(id));
+    startTransition(() => {
+      void removeChannelAction(id).then(() => {
+        router.refresh();
+        window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT, { detail: { autoSync: true } }));
+      });
+    });
   }
 
   return (

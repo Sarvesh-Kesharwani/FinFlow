@@ -1,7 +1,9 @@
 import { Suspense } from 'react';
 import { TimeFilter } from '@/components/TimeFilter';
-import { VideoCard } from '@/components/VideoCard';
 import { EmptyState } from '@/components/EmptyState';
+import { MixedFeedClient } from '@/components/MixedFeedClient';
+import { getRequestTime } from '@/lib/render';
+import { getSession } from '@/lib/session';
 import { parseRange } from '@/lib/time';
 import { getMixedFeed } from '@/lib/youtube';
 import { getWhitelistedChannelIds } from '@/lib/whitelist';
@@ -35,6 +37,19 @@ export default async function MixedPage({
 }
 
 async function Feed({ range }: { range: ReturnType<typeof parseRange> }) {
+  const now = getRequestTime();
+  const session = await getSession();
+
+  if (!session?.user) {
+    return (
+      <EmptyState
+        emoji="🔒"
+        title="Sign in to view your dashboard"
+        description="Tubeo clears your saved feed on logout. Sign in again to load your channels."
+      />
+    );
+  }
+
   if ((await getWhitelistedChannelIds()).length === 0) {
     return (
       <EmptyState
@@ -47,7 +62,7 @@ async function Feed({ range }: { range: ReturnType<typeof parseRange> }) {
 
   let videos;
   try {
-    videos = await getMixedFeed(range);
+    videos = await getMixedFeed(range, 10, now);
   } catch (e) {
     return (
       <EmptyState
@@ -62,13 +77,7 @@ async function Feed({ range }: { range: ReturnType<typeof parseRange> }) {
     return <EmptyState emoji="🌱" title="Nothing new in this range" description="Try a longer time window." />;
   }
 
-  return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-      {videos.map((v) => (
-        <VideoCard key={v.id} video={v} />
-      ))}
-    </div>
-  );
+  return <MixedFeedClient videos={videos} now={now} />;
 }
 
 function FeedSkeleton() {
