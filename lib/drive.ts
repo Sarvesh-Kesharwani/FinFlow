@@ -12,6 +12,7 @@ const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const FILE_NAME = 'tubeo-channels.json';
 const BACKUP_FOLDER_NAME = 'tubeo-backups';
+const SNAPSHOT_FILE_PREFIX = 'tubeo-snapshot-';
 const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 const SPACE = 'appDataFolder';
 
@@ -128,8 +129,8 @@ function escapeDriveQueryValue(value: string): string {
 async function listFiles(
   accessToken: string,
   query: string,
-  fields = 'files(id,name,mimeType)',
-): Promise<Array<{ id: string; name?: string; mimeType?: string }>> {
+  fields = 'files(id,name,mimeType,createdTime)',
+): Promise<Array<{ id: string; name?: string; mimeType?: string; createdTime?: string }>> {
   const qs = new URLSearchParams({ spaces: SPACE, fields, q: query });
   const res = await fetch(`${DRIVE_API}/files?${qs}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -167,6 +168,10 @@ async function readPrimaryDriveData(accessToken: string): Promise<{ id: string; 
     id: fileId,
     data: await readFileJson<DriveChannelData>(accessToken, fileId),
   };
+}
+
+function snapshotFileName(now = new Date()): string {
+  return `${SNAPSHOT_FILE_PREFIX}${now.toISOString().replace(/[:]/g, '-')}.json`;
 }
 
 async function uploadJsonFile(
@@ -260,11 +265,50 @@ async function ensureDailyBackup(
   );
 }
 
+async function createSnapshotBackup(
+  accessToken: string,
+  payload: DriveChannelData,
+): Promise<void> {
+  const backupFolderId = await ensureBackupFolder(accessToken);
+  await uploadJsonFile(
+    accessToken,
+    snapshotFileName(),
+    JSON.stringify(payload),
+    { parents: [backupFolderId] },
+  );
+}
+
+async function readLatestBackupData(accessToken: string): Promise<DriveSyncState | null> {
+  const backupFolderId = await findFile(accessToken, BACKUP_FOLDER_NAME, SPACE, FOLDER_MIME_TYPE);
+  if (!backupFolderId) return null;
+
+  const files = await listFiles(
+    accessToken,
+    [
+      `'${escapeDriveQueryValue(backupFolderId)}' in parents`,
+      `name contains '${escapeDriveQueryValue('tubeo-')}'`,
+    ].join(' and '),
+    'files(id,name,createdTime)',
+  );
+  const latest = [...files].sort((a, b) => {
+    const byName = (b.name ?? '').localeCompare(a.name ?? '');
+    if (byName !== 0) return byName;
+    return Date.parse(b.createdTime ?? '') - Date.parse(a.createdTime ?? '');
+  })[0];
+  if (!latest?.id) return null;
+
+  const data = await readFileJson<DriveChannelData>(accessToken, latest.id);
+  return normalizeDriveStore(data);
+}
+
 export async function readDriveChannels(
   accessToken: string,
 ): Promise<DriveSyncState | null> {
   const existing = await readPrimaryDriveData(accessToken);
-  return normalizeDriveStore(existing?.data ?? null);
+  const normalized = normalizeDriveStore(existing?.data ?? null);
+  if (normalized) return normalized;
+
+  return readLatestBackupData(accessToken);
 }
 
 export async function deleteDriveChannels(accessToken: string): Promise<void> {
@@ -296,7 +340,20 @@ export async function writeDriveChannels(accessToken: string, store: DriveWriteS
     updatedAt: new Date().toISOString(),
   };
   const json = JSON.stringify(body);
+  const nextNormalized = normalizeDriveStore(body);
+
+  if (existing?.data) {
+    const existingJson = JSON.stringify(existing.data);
+    if (existingJson !== json) {
+      await createSnapshotBackup(accessToken, existing.data);
+    }
+  }
+
   await uploadJsonFile(accessToken, FILE_NAME, json, { fileId: existing?.id, parents: [SPACE] });
+
+  if (!existing?.data || JSON.stringify(normalizeDriveStore(existing.data)) !== JSON.stringify(nextNormalized)) {
+    await createSnapshotBackup(accessToken, body);
+  }
 }
 
 export async function recordDriveQuotaUsage(
