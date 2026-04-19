@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { NavTabs } from '@/components/NavTabs';
 import { AuthButton } from '@/components/AuthButton';
+import { SyncButton } from '@/components/SyncButton';
 import './globals.css';
 
 const nunito = Nunito({ subsets: ['latin'], weight: ['400', '700', '800', '900'], display: 'swap' });
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Suspense fallback={null}>
                 <NavTabs />
               </Suspense>
+              <SyncButton />
               <Link href="/settings" className="chip text-duo-ink/60 hover:text-duo-ink" title="Manage channels">
                 ⚙️
               </Link>
