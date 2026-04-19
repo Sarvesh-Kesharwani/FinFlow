@@ -88,7 +88,14 @@ export function VideoPlayerModal({
           <aside className="flex min-h-0 flex-col gap-4 border-t-2 border-duo-border bg-white p-4 sm:p-5 lg:border-l-2 lg:border-t-0">
             <div className="rounded-[28px] border-2 border-duo-border bg-duo-soft/80 p-4">
               <p className="text-xs font-black uppercase tracking-[0.2em] text-duo-greenDark">Channel</p>
-              <p className="mt-2 text-lg font-extrabold text-duo-ink">{video.channelTitle}</p>
+              <a
+                href={`https://www.youtube.com/channel/${video.channelId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 block text-lg font-extrabold text-duo-ink hover:underline"
+              >
+                {video.channelTitle}
+              </a>
               <p className="mt-2 text-sm font-bold text-duo-mute">{timeAgo(video.publishedAt, now)}</p>
             </div>
 

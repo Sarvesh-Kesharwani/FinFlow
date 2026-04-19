@@ -85,7 +85,8 @@ async function Grouped({
   let groups;
   let quotaUnits = 0;
   try {
-    const result = await getChannelGroupedFeedWithQuota(range, media, 6, now);
+    const perChannel = range === 'all' ? 50 : 12;
+    const result = await getChannelGroupedFeedWithQuota(range, media, perChannel, now);
     groups = result.groups;
     quotaUnits = result.quota.refreshCost;
   } catch (error) {
