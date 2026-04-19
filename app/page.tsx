@@ -2,16 +2,14 @@ import { Suspense } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { MediaTypeFilter } from '@/components/MediaTypeFilter';
 import { MixedFeedClient } from '@/components/MixedFeedClient';
+import { QuotaUsageTracker } from '@/components/QuotaUsageTracker';
 import { TimeFilter } from '@/components/TimeFilter';
-import { getCookieChannelStore } from '@/lib/channels-cookie';
 import { parseMediaFilter } from '@/lib/media';
 import { getRequestTime } from '@/lib/render';
 import { getSession } from '@/lib/session';
 import { parseRange } from '@/lib/time';
-import { getMixedFeedWithQuota, trackYouTubeQuotaUsage } from '@/lib/youtube';
+import { getMixedFeedWithQuota } from '@/lib/youtube';
 import { getWhitelistedChannelIds } from '@/lib/whitelist';
-
-export const dynamic = 'force-dynamic';
 
 export default async function MixedPage({
   searchParams,
@@ -72,18 +70,11 @@ async function Feed({
   }
 
   let videos;
+  let quotaUnits = 0;
   try {
     const result = await getMixedFeedWithQuota(range, media, 10, now);
     videos = result.videos;
-
-    if (session.accessToken) {
-      try {
-        const cookieStore = await getCookieChannelStore();
-        await trackYouTubeQuotaUsage(session.accessToken, result.quota, cookieStore);
-      } catch {
-        // Don't block the feed if quota persistence fails.
-      }
-    }
+    quotaUnits = result.quota.refreshCost;
   } catch (error) {
     return <EmptyState emoji="!" title="Couldn't load feed" description={(error as Error).message} />;
   }
@@ -98,7 +89,14 @@ async function Feed({
     );
   }
 
-  return <MixedFeedClient videos={videos} now={now} />;
+  return (
+    <>
+      {session.accessToken && quotaUnits > 0 && (
+        <QuotaUsageTracker units={quotaUnits} trackingKey={`home:${range}:${media}:${now}`} />
+      )}
+      <MixedFeedClient videos={videos} now={now} />
+    </>
+  );
 }
 
 function FeedSkeleton() {

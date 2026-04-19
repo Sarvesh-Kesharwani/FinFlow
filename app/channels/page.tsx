@@ -2,18 +2,16 @@ import { Suspense } from 'react';
 import { ChannelRow } from '@/components/ChannelRow';
 import { EmptyState } from '@/components/EmptyState';
 import { MediaTypeFilter } from '@/components/MediaTypeFilter';
+import { QuotaUsageTracker } from '@/components/QuotaUsageTracker';
 import { SpaceTabs } from '@/components/SpaceTabs';
 import { TimeFilter } from '@/components/TimeFilter';
-import { getCookieChannelStore } from '@/lib/channels-cookie';
 import { parseMediaFilter } from '@/lib/media';
 import { getRequestTime } from '@/lib/render';
 import { getSession } from '@/lib/session';
 import { parseRange } from '@/lib/time';
 import { DEFAULT_CHANNEL_SPACE } from '@/lib/types';
-import { getChannelGroupedFeedWithQuota, trackYouTubeQuotaUsage } from '@/lib/youtube';
+import { getChannelGroupedFeedWithQuota } from '@/lib/youtube';
 import { getWhitelistedChannelPreferences, getWhitelistedChannelSpaces } from '@/lib/whitelist';
-
-export const dynamic = 'force-dynamic';
 const OVERVIEW_SPACE = 'all';
 
 export default async function ChannelsPage({
@@ -85,18 +83,11 @@ async function Grouped({
   const orderedSpaces = [...new Set(savedSpaces.map((space) => space || DEFAULT_CHANNEL_SPACE))];
 
   let groups;
+  let quotaUnits = 0;
   try {
     const result = await getChannelGroupedFeedWithQuota(range, media, 6, now);
     groups = result.groups;
-
-    if (session.accessToken) {
-      try {
-        const cookieStore = await getCookieChannelStore();
-        await trackYouTubeQuotaUsage(session.accessToken, result.quota, cookieStore);
-      } catch {
-        // Don't block the channels page if quota persistence fails.
-      }
-    }
+    quotaUnits = result.quota.refreshCost;
   } catch (error) {
     return <EmptyState emoji="!" title="Couldn't load channels" description={(error as Error).message} />;
   }
@@ -139,6 +130,12 @@ async function Grouped({
 
   return (
     <div className="space-y-6">
+      {session.accessToken && quotaUnits > 0 && (
+        <QuotaUsageTracker
+          units={quotaUnits}
+          trackingKey={`channels:${range}:${activeSpaceValue}:${media}:${now}`}
+        />
+      )}
       <SpaceTabs activeSpace={activeSpaceValue} tabs={tabs} />
 
       {activeSpaceValue === OVERVIEW_SPACE ? (
