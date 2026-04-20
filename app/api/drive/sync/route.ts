@@ -91,27 +91,30 @@ export async function POST() {
         initialized: true,
         driveWins: true,
         replacedLocal,
+        updatedAt: driveData.updatedAt,
         channelIds: driveData.channels.map((channel) => channel.id),
       });
     }
 
+    const syncedAt = new Date().toISOString();
     await writeDriveChannels(session.accessToken, {
       channels: cookieOnly,
       spaces: localSpaces,
       quota: driveData?.quota,
     });
-    await markCookieChannelStoreSynced();
+    await markCookieChannelStoreSynced(syncedAt);
     await markDriveSyncHydrated();
+
+    return Response.json({
+      ok: true,
+      initialized: true,
+      seededFromLocal: true,
+      updatedAt: syncedAt,
+      channelIds: cookieOnly.map((channel) => channel.id),
+    });
   } catch {
     return Response.json({ error: 'Failed to write Drive sync state' }, { status: 502 });
   }
-
-  return Response.json({
-    ok: true,
-    initialized: true,
-    seededFromLocal: true,
-    channelIds: cookieOnly.map((channel) => channel.id),
-  });
 }
 
 // PUT /api/drive/sync - pull Drive channels into cookie (called on login, Drive wins)

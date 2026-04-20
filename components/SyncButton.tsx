@@ -42,15 +42,14 @@ export function SyncButton() {
       const data = await r.json();
       if (data.initialized || data.driveWins || data.seededFromLocal) {
         sessionStorage.setItem(PULLED_KEY, '1');
-        setLastSynced(new Date().toISOString());
+        setLastSynced(data.updatedAt ?? new Date().toISOString());
         setState('synced');
         if (data.replacedLocal || data.seededFromLocal) {
           router.refresh();
         }
-        await checkSync();
         return;
       }
-      setLastSynced(new Date().toISOString());
+      setLastSynced(data.updatedAt ?? new Date().toISOString());
       setState('synced');
     } catch {
       setState('unsynced');
