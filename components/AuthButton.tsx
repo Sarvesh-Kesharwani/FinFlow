@@ -1,5 +1,6 @@
-import { signIn, signOut } from '@/auth';
+import { signOut } from '@/auth';
 import Image from 'next/image';
+import { SignInButton } from '@/components/SignInButton';
 import { SignOutButton } from '@/components/SignOutButton';
 import { clearCookieChannelIds } from '@/lib/channels-cookie';
 import { getSession } from '@/lib/session';
@@ -13,6 +14,7 @@ export async function AuthButton() {
       await clearCookieChannelIds();
       await signOut({ redirectTo: '/' });
     };
+
     return (
       <form className="flex items-center gap-2 chip">
         {session.user.image && (
@@ -24,7 +26,7 @@ export async function AuthButton() {
             className="rounded-full"
           />
         )}
-        <span className="hidden sm:inline text-sm font-bold truncate max-w-[120px]">
+        <span className="hidden max-w-[120px] truncate text-sm font-bold sm:inline">
           {session.user.name}
         </span>
         <SignOutButton action={signOutAction} />
@@ -32,16 +34,5 @@ export async function AuthButton() {
     );
   }
 
-  return (
-    <form
-      action={async () => {
-        'use server';
-        await signIn('google', { redirectTo: '/' });
-      }}
-    >
-      <button type="submit" className="btn-duo-green text-sm">
-        <span aria-hidden>🔑</span> Sign in
-      </button>
-    </form>
-  );
+  return <SignInButton />;
 }

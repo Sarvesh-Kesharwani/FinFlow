@@ -10,7 +10,7 @@ import './globals.css';
 const nunito = Nunito({ subsets: ['latin'], weight: ['400', '700', '800', '900'], display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'Personal YouTube',
+  title: 'Tubeo',
   description: 'Curated feed of your favorite channels.',
 };
 
