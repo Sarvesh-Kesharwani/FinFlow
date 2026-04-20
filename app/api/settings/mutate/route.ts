@@ -38,6 +38,7 @@ async function hydrateCookieStoreFromDriveIfNeeded(): Promise<void> {
     await setCookieChannelStore({
       channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
       spaces: driveData.spaces,
+      view: driveData.view,
     });
     await markCookieChannelStoreSynced(driveData.updatedAt);
   } else if (localMeta.updatedAt) {
@@ -178,6 +179,7 @@ export async function POST(req: Request) {
           channel.space === existingSpace ? { ...channel, space: renamedSpace } : channel,
         ),
         spaces: store.spaces.map((space) => (space === existingSpace ? renamedSpace : space)),
+        view: store.view,
       });
       await markCookieChannelStoreDirty();
       return ok({ success: renamedSpace });
@@ -197,6 +199,7 @@ export async function POST(req: Request) {
           channel.space === targetSpace ? { ...channel, space: DEFAULT_CHANNEL_SPACE } : channel,
         ),
         spaces: store.spaces.filter((space) => space !== targetSpace),
+        view: store.view,
       });
       await markCookieChannelStoreDirty();
       return ok({ success: targetSpace });

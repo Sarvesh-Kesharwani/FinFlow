@@ -6,7 +6,9 @@ import {
   type DailyQuotaUsage,
   type ChannelPreference,
   type ChannelPreferenceStore,
+  type ViewPreferences,
 } from './types';
+import { DEFAULT_VIEW_PREFERENCES, normalizeViewPreferences } from './view-preferences';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
@@ -20,6 +22,7 @@ export interface DriveChannelData {
   channelIds?: string[];
   channels?: ChannelPreference[];
   spaces?: string[];
+  view?: Partial<ViewPreferences>;
   quota?: DailyQuotaUsage;
   updatedAt: string; // ISO
 }
@@ -117,6 +120,7 @@ function normalizeDriveStore(data: DriveChannelData | null): DriveSyncState | nu
   return {
     channels: normalizedChannels,
     spaces,
+    view: normalizeViewPreferences(data.view),
     quota: normalizeQuotaUsage(data.quota),
     updatedAt: data.updatedAt ?? new Date(0).toISOString(),
   };
@@ -331,11 +335,13 @@ export async function writeDriveChannels(accessToken: string, store: DriveWriteS
     ...store.spaces,
     ...normalizedChannels.map((channel) => channel.space),
   ]);
+  const normalizedView = normalizeViewPreferences(store.view ?? DEFAULT_VIEW_PREFERENCES);
   const normalizedQuota = normalizeQuotaUsage(store.quota);
   const body: DriveChannelData = {
     channels: normalizedChannels,
     channelIds: normalizedChannels.map((channel) => channel.id),
     spaces: normalizedSpaces,
+    view: normalizedView,
     quota: normalizedQuota,
     updatedAt: new Date().toISOString(),
   };
@@ -359,12 +365,16 @@ export async function writeDriveChannels(accessToken: string, store: DriveWriteS
 export async function recordDriveQuotaUsage(
   accessToken: string,
   units: number,
-  fallbackStore: ChannelPreferenceStore = { channels: [], spaces: [DEFAULT_CHANNEL_SPACE] },
+  fallbackStore: ChannelPreferenceStore = {
+    channels: [],
+    spaces: [DEFAULT_CHANNEL_SPACE],
+    view: DEFAULT_VIEW_PREFERENCES,
+  },
 ): Promise<DailyQuotaUsage> {
   const normalizedUnits = Math.max(0, Math.ceil(units));
   const existing = await readDriveChannels(accessToken);
   const baseStore: ChannelPreferenceStore = existing
-    ? { channels: existing.channels, spaces: existing.spaces }
+    ? { channels: existing.channels, spaces: existing.spaces, view: existing.view }
     : fallbackStore;
   const quota = normalizeQuotaUsage(existing?.quota);
   const nextQuota: DailyQuotaUsage = {
@@ -376,6 +386,7 @@ export async function recordDriveQuotaUsage(
   await writeDriveChannels(accessToken, {
     channels: baseStore.channels,
     spaces: baseStore.spaces,
+    view: baseStore.view,
     quota: nextQuota,
   });
 

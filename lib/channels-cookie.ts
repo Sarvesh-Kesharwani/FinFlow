@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { normalizeSpaceName } from './spaces';
-import { DEFAULT_CHANNEL_SPACE, type ChannelPreference, type ChannelPreferenceStore } from './types';
+import { DEFAULT_CHANNEL_SPACE, type ChannelPreference, type ChannelPreferenceStore, type ViewPreferences } from './types';
+import { DEFAULT_VIEW_PREFERENCES, normalizeViewPreferences } from './view-preferences';
 
 const COOKIE = 'tubeo_channels';
 const DRIVE_READY_COOKIE = 'tubeo_drive_ready';
@@ -42,14 +43,15 @@ function normalizeStore(store: ChannelPreferenceStore): ChannelPreferenceStore {
     ...store.spaces,
     ...channels.map((channel) => channel.space),
   ]);
+  const view = normalizeViewPreferences(store.view);
 
-  return { channels, spaces };
+  return { channels, spaces, view };
 }
 
 function parseCookieChannelStore(raw: string): ChannelPreferenceStore {
   const value = raw.trim();
   if (!value) {
-    return { channels: [], spaces: [DEFAULT_CHANNEL_SPACE] };
+    return { channels: [], spaces: [DEFAULT_CHANNEL_SPACE], view: DEFAULT_VIEW_PREFERENCES };
   }
 
   if (!value.startsWith('{') && !value.startsWith('[')) {
@@ -60,6 +62,7 @@ function parseCookieChannelStore(raw: string): ChannelPreferenceStore {
         .filter(Boolean)
         .map((id) => ({ id, space: DEFAULT_CHANNEL_SPACE })),
       spaces: [DEFAULT_CHANNEL_SPACE],
+      view: DEFAULT_VIEW_PREFERENCES,
     });
   }
 
@@ -68,12 +71,14 @@ function parseCookieChannelStore(raw: string): ChannelPreferenceStore {
       | {
           channels?: Array<{ id?: string; space?: string }>;
           spaces?: string[];
+          view?: Partial<ViewPreferences>;
         }
       | Array<{ id?: string; space?: string }>
       | null;
 
     const channels = Array.isArray(parsed) ? parsed : parsed?.channels ?? [];
     const spaces = Array.isArray(parsed) ? [] : parsed?.spaces ?? [];
+    const view = Array.isArray(parsed) ? DEFAULT_VIEW_PREFERENCES : parsed?.view;
 
     return normalizeStore({
       channels: channels
@@ -83,9 +88,10 @@ function parseCookieChannelStore(raw: string): ChannelPreferenceStore {
         }))
         .filter((item) => item.id),
       spaces,
+      view: normalizeViewPreferences(view),
     });
   } catch {
-    return { channels: [], spaces: [DEFAULT_CHANNEL_SPACE] };
+    return { channels: [], spaces: [DEFAULT_CHANNEL_SPACE], view: DEFAULT_VIEW_PREFERENCES };
   }
 }
 
@@ -105,6 +111,10 @@ export async function getCookieChannelSpaces(): Promise<string[]> {
 
 export async function getCookieChannelIds(): Promise<string[]> {
   return (await getCookieChannelPreferences()).map((channel) => channel.id);
+}
+
+export async function getCookieViewPreferences(): Promise<ViewPreferences> {
+  return (await getCookieChannelStore()).view;
 }
 
 export async function setCookieChannelIds(ids: string[]): Promise<void> {
@@ -172,12 +182,17 @@ export async function markCookieChannelStoreSynced(updatedAt = new Date().toISOS
 
 export async function setCookieChannelPreferences(channels: ChannelPreference[]): Promise<void> {
   const existing = await getCookieChannelStore();
-  await setCookieChannelStore({ channels, spaces: existing.spaces });
+  await setCookieChannelStore({ channels, spaces: existing.spaces, view: existing.view });
 }
 
 export async function setCookieChannelSpaces(spaces: string[]): Promise<void> {
   const existing = await getCookieChannelStore();
-  await setCookieChannelStore({ channels: existing.channels, spaces });
+  await setCookieChannelStore({ channels: existing.channels, spaces, view: existing.view });
+}
+
+export async function setCookieViewPreferences(view: ViewPreferences): Promise<void> {
+  const existing = await getCookieChannelStore();
+  await setCookieChannelStore({ channels: existing.channels, spaces: existing.spaces, view });
 }
 
 export async function clearCookieChannelIds(): Promise<void> {

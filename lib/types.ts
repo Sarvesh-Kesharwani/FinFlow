@@ -3,6 +3,7 @@
 export type TimeRange = '1d' | '3d' | '7d' | '30d' | '180d' | '365d' | 'all';
 export type MediaFilter = 'all' | 'videos' | 'shorts';
 export const DEFAULT_CHANNEL_SPACE = 'ALL';
+export const CHANNELS_OVERVIEW_SPACE = 'all';
 
 export interface Channel {
   id: string;
@@ -16,9 +17,24 @@ export interface ChannelPreference {
   space: string;
 }
 
+export interface MixedFeedViewPreferences {
+  range: TimeRange;
+  media: MediaFilter;
+}
+
+export interface ChannelsViewPreferences extends MixedFeedViewPreferences {
+  space: string;
+}
+
+export interface ViewPreferences {
+  home: MixedFeedViewPreferences;
+  channels: ChannelsViewPreferences;
+}
+
 export interface ChannelPreferenceStore {
   channels: ChannelPreference[];
   spaces: string[];
+  view: ViewPreferences;
 }
 
 export interface DailyQuotaUsage {
