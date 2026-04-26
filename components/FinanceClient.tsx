@@ -92,18 +92,27 @@ function StatCard({ label, value, tone = 'rose' }: { label: string; value: strin
   );
 }
 
-function ExpenseRow({ item, onRemove }: { item: ExpenseEntry; onRemove: (id: string) => void }) {
+function ExpenseRow({
+  item,
+  onRemove,
+  showFrequency,
+}: {
+  item: ExpenseEntry;
+  onRemove: (id: string) => void;
+  showFrequency: boolean;
+}) {
   const customFrequency = parseCustomFrequency(item.notes);
+  const frequencyLabel =
+    item.cadence === 'custom' && customFrequency ? `Custom (${customFrequency})` : item.cadence;
 
   return (
     <li className="lift-card">
       <div className="min-w-0">
         <p className="truncate font-extrabold text-duored-ink">{item.title}</p>
-        <p className="text-xs text-duored-muted">
-          {item.cadence}
-          {item.cadence === 'custom' && customFrequency ? ` (${customFrequency})` : ''} -{' '}
-          {new Date(item.spentOn).toLocaleDateString()}
-        </p>
+        <div className="text-xs text-duored-muted">
+          {showFrequency && <p>Freq: {frequencyLabel}</p>}
+          <p>{new Date(item.spentOn).toLocaleDateString()}</p>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <p className="font-extrabold text-duored-deep">{formatMoney(item.amount)}</p>
@@ -208,17 +217,18 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       return;
     }
 
-    if (form.mode === 'repetitive' && !form.frequency) {
+    if (bucket === 'predicted' && form.mode === 'repetitive' && !form.frequency) {
       setError('Select a frequency for repetitive expenses');
       return;
     }
 
-    if (form.mode === 'repetitive' && form.frequency === 'custom' && !form.customFrequency.trim()) {
+    if (bucket === 'predicted' && form.mode === 'repetitive' && form.frequency === 'custom' && !form.customFrequency.trim()) {
       setError('Add a custom frequency label so you can reuse it');
       return;
     }
 
-    const cadence: ExpenseCadence = form.mode === 'one-time' ? 'one-time' : (form.frequency as ExpenseCadence);
+    const cadence: ExpenseCadence =
+      bucket === 'actual' ? 'one-time' : form.mode === 'one-time' ? 'one-time' : (form.frequency as ExpenseCadence);
     const notes = cadence === 'custom' ? `${CUSTOM_FREQ_PREFIX}${form.customFrequency.trim()}` : undefined;
 
     runMutation({
@@ -250,6 +260,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     setForm: Dispatch<SetStateAction<ExpenseFormState>>;
     expenses: ExpenseEntry[];
   }) {
+    const supportsFrequency = bucket === 'predicted';
+
     return (
       <section className="card-panel">
         <div className="flex items-center gap-2">
@@ -278,51 +290,55 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))}
             placeholder="Price"
           />
-          <div className="flex items-center gap-2 rounded-xl border-2 border-duored-soft bg-white/80 px-3 py-2 md:col-span-2">
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Type</span>
-            <button
-              type="button"
-              className={form.mode === 'one-time' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
-              onClick={() => setForm((s) => ({ ...s, mode: 'one-time', frequency: '', customFrequency: '' }))}
-            >
-              One-timer
-            </button>
-            <button
-              type="button"
-              className={form.mode === 'repetitive' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
-              onClick={() => setForm((s) => ({ ...s, mode: 'repetitive', frequency: s.frequency || 'monthly' }))}
-            >
-              Repetitive
-            </button>
-          </div>
-
-          {form.mode === 'repetitive' && (
+          {supportsFrequency && (
             <>
-              <select
-                className="text-input"
-                value={form.frequency}
-                onChange={(e) => setForm((s) => ({ ...s, frequency: e.target.value as '' | ExpenseCadence }))}
-              >
-                <option value="">Frequency of purchase</option>
-                {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2 rounded-xl border-2 border-duored-soft bg-white/80 px-3 py-2 md:col-span-2">
+                <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Type</span>
+                <button
+                  type="button"
+                  className={form.mode === 'one-time' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
+                  onClick={() => setForm((s) => ({ ...s, mode: 'one-time', frequency: '', customFrequency: '' }))}
+                >
+                  One-timer
+                </button>
+                <button
+                  type="button"
+                  className={form.mode === 'repetitive' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
+                  onClick={() => setForm((s) => ({ ...s, mode: 'repetitive', frequency: s.frequency || 'monthly' }))}
+                >
+                  Repetitive
+                </button>
+              </div>
 
-              {form.frequency === 'custom' ? (
-                <input
-                  className="text-input"
-                  value={form.customFrequency}
-                  onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
-                  placeholder="Custom frequency (for example: every 45 days)"
-                  list={`custom-frequency-${bucket}`}
-                />
-              ) : (
-                <div className="text-xs font-semibold text-duored-muted">
-                  Frequency is reusable when you choose custom and save a label.
-                </div>
+              {form.mode === 'repetitive' && (
+                <>
+                  <select
+                    className="text-input"
+                    value={form.frequency}
+                    onChange={(e) => setForm((s) => ({ ...s, frequency: e.target.value as '' | ExpenseCadence }))}
+                  >
+                    <option value="">Frequency of purchase</option>
+                    {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {form.frequency === 'custom' ? (
+                    <input
+                      className="text-input"
+                      value={form.customFrequency}
+                      onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
+                      placeholder="Custom frequency (for example: every 45 days)"
+                      list={`custom-frequency-${bucket}`}
+                    />
+                  ) : (
+                    <div className="text-xs font-semibold text-duored-muted">
+                      Frequency is reusable when you choose custom and save a label.
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -338,7 +354,12 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
         ) : (
           <ul className="space-y-2">
             {expenses.map((entry) => (
-              <ExpenseRow key={entry.id} item={entry} onRemove={(expenseId) => runMutation({ op: 'remove_expense', expenseId })} />
+              <ExpenseRow
+                key={entry.id}
+                item={entry}
+                onRemove={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
+                showFrequency={supportsFrequency}
+              />
             ))}
           </ul>
         )}
