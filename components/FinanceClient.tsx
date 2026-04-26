@@ -1,18 +1,38 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { type Dispatch, type SetStateAction, useMemo, useState, useTransition } from 'react';
 import { summarizeFinance } from '@/lib/finance-math';
 import {
   EXPENSE_CADENCE_OPTIONS,
-  EXPENSE_CATEGORIES,
   type BuyListItem,
+  type ExpenseBucket,
   type ExpenseCadence,
-  type ExpenseCategory,
   type ExpenseEntry,
   type FinanceStore,
 } from '@/lib/finance-types';
 
 const FINANCE_CHANGED_EVENT = 'finance-state-changed';
+const CUSTOM_FREQ_PREFIX = 'custom-frequency:';
+
+type ExpenseFormMode = 'one-time' | 'repetitive';
+
+type ExpenseFormState = {
+  title: string;
+  amount: string;
+  mode: ExpenseFormMode;
+  frequency: '' | ExpenseCadence;
+  customFrequency: string;
+};
+
+function createExpenseForm(): ExpenseFormState {
+  return {
+    title: '',
+    amount: '',
+    mode: 'one-time',
+    frequency: '',
+    customFrequency: '',
+  };
+}
 
 function formatMoney(amount: number, currency = 'INR'): string {
   const normalized = currency.toUpperCase();
@@ -24,13 +44,21 @@ function formatMoney(amount: number, currency = 'INR'): string {
   }).format(amount);
 }
 
+function parseCustomFrequency(notes?: string): string {
+  if (!notes) return '';
+  const normalized = notes.trim();
+  if (!normalized.toLowerCase().startsWith(CUSTOM_FREQ_PREFIX)) return '';
+  return normalized.slice(CUSTOM_FREQ_PREFIX.length).trim();
+}
+
 type FinanceOp =
   | { op: 'set_income'; monthlyIncome: number }
   | {
       op: 'add_expense';
       title: string;
       amount: number;
-      category: ExpenseCategory;
+      bucket: ExpenseBucket;
+      category: 'other';
       frequency?: ExpenseCadence;
       cadence?: ExpenseCadence;
       spentOn: string;
@@ -65,12 +93,16 @@ function StatCard({ label, value, tone = 'rose' }: { label: string; value: strin
 }
 
 function ExpenseRow({ item, onRemove }: { item: ExpenseEntry; onRemove: (id: string) => void }) {
+  const customFrequency = parseCustomFrequency(item.notes);
+
   return (
     <li className="lift-card">
       <div className="min-w-0">
         <p className="truncate font-extrabold text-duored-ink">{item.title}</p>
         <p className="text-xs text-duored-muted">
-          {item.category} · {item.cadence} · {new Date(item.spentOn).toLocaleDateString()}
+          {item.cadence}
+          {item.cadence === 'custom' && customFrequency ? ` (${customFrequency})` : ''} -{' '}
+          {new Date(item.spentOn).toLocaleDateString()}
         </p>
       </div>
       <div className="flex items-center gap-2">
@@ -102,9 +134,7 @@ function BuyRow({
     <li className={`lift-card ${affordable ? 'ring-2 ring-emerald-300' : ''}`}>
       <div className="min-w-0">
         <p className="truncate font-extrabold text-duored-ink">{item.title}</p>
-        <p className="mt-1 text-xs font-semibold text-duored-muted">
-          Source: {item.sourcePlatform || 'Online Store'}
-        </p>
+        <p className="mt-1 text-xs font-semibold text-duored-muted">Source: {item.sourcePlatform || 'Online Store'}</p>
         <a href={item.url} target="_blank" rel="noreferrer" className="block truncate text-xs text-duored-link underline">
           {item.url}
         </a>
@@ -113,10 +143,10 @@ function BuyRow({
       <div className="flex items-center gap-2">
         <span className="chip-price">{formatMoney(item.price, item.currency || 'INR')}</span>
         <button className="chip-soft" onClick={() => onMove(item.id, 'up')} disabled={index === 0} type="button">
-          ↑
+          Up
         </button>
         <button className="chip-soft" onClick={() => onMove(item.id, 'down')} disabled={index === length - 1} type="button">
-          ↓
+          Down
         </button>
         <button className="chip-danger" onClick={() => onRemove(item.id)} type="button">
           Remove
@@ -133,16 +163,29 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const summary = useMemo(() => summarizeFinance(state), [state]);
   const affordableSet = useMemo(() => new Set(summary.affordableItemIds), [summary.affordableItemIds]);
 
-  const [expenseForm, setExpenseForm] = useState({
-    title: '',
-    amount: '',
-    category: 'purchases' as ExpenseCategory,
-    frequency: '' as '' | ExpenseCadence,
-    spentOn: new Date().toISOString().slice(0, 10),
-    notes: '',
-  });
+  const [predictedForm, setPredictedForm] = useState(createExpenseForm);
+  const [actualForm, setActualForm] = useState(createExpenseForm);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
   const [incomeInput, setIncomeInput] = useState(String(state.monthlyIncome || ''));
+
+  const predictedExpenses = useMemo(
+    () => state.expenses.filter((entry) => entry.bucket === 'predicted'),
+    [state.expenses],
+  );
+  const actualExpenses = useMemo(
+    () => state.expenses.filter((entry) => entry.bucket !== 'predicted'),
+    [state.expenses],
+  );
+
+  const customFrequencyOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const entry of state.expenses) {
+      if (entry.cadence !== 'custom') continue;
+      const value = parseCustomFrequency(entry.notes);
+      if (value) values.add(value);
+    }
+    return Array.from(values);
+  }, [state.expenses]);
 
   function runMutation(payload: FinanceOp) {
     setError('');
@@ -151,6 +194,162 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
         .then((next) => setState(next))
         .catch((e) => setError((e as Error).message));
     });
+  }
+
+  function addExpense(bucket: ExpenseBucket, form: ExpenseFormState, setForm: Dispatch<SetStateAction<ExpenseFormState>>) {
+    if (!form.title.trim()) {
+      setError('Expense name is required');
+      return;
+    }
+
+    const amount = Number(form.amount || '0');
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError('Expense price must be greater than 0');
+      return;
+    }
+
+    if (form.mode === 'repetitive' && !form.frequency) {
+      setError('Select a frequency for repetitive expenses');
+      return;
+    }
+
+    if (form.mode === 'repetitive' && form.frequency === 'custom' && !form.customFrequency.trim()) {
+      setError('Add a custom frequency label so you can reuse it');
+      return;
+    }
+
+    const cadence: ExpenseCadence = form.mode === 'one-time' ? 'one-time' : (form.frequency as ExpenseCadence);
+    const notes = cadence === 'custom' ? `${CUSTOM_FREQ_PREFIX}${form.customFrequency.trim()}` : undefined;
+
+    runMutation({
+      op: 'add_expense',
+      title: form.title,
+      amount,
+      bucket,
+      category: 'other',
+      frequency: cadence,
+      spentOn: new Date().toISOString().slice(0, 10),
+      notes,
+    });
+
+    setForm(createExpenseForm);
+  }
+
+  function ExpenseEditor({
+    bucket,
+    title,
+    infoText,
+    form,
+    setForm,
+    expenses,
+  }: {
+    bucket: ExpenseBucket;
+    title: string;
+    infoText?: string;
+    form: ExpenseFormState;
+    setForm: Dispatch<SetStateAction<ExpenseFormState>>;
+    expenses: ExpenseEntry[];
+  }) {
+    return (
+      <section className="card-panel">
+        <div className="flex items-center gap-2">
+          <h2 className="section-title">{title}</h2>
+          {infoText && (
+            <button className="chip-soft h-6 w-6 p-0 text-center font-extrabold" type="button" title={infoText} aria-label={infoText}>
+              i
+            </button>
+          )}
+        </div>
+
+        <h3 className="mb-2 mt-1 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">add_expense</h3>
+        <div className="grid gap-2 md:grid-cols-2">
+          <input
+            className="text-input"
+            value={form.title}
+            onChange={(e) => setForm((s) => ({ ...s, title: e.target.value }))}
+            placeholder="Expense name"
+          />
+          <input
+            className="text-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.amount}
+            onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))}
+            placeholder="Price"
+          />
+          <div className="flex items-center gap-2 rounded-xl border-2 border-duored-soft bg-white/80 px-3 py-2 md:col-span-2">
+            <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Type</span>
+            <button
+              type="button"
+              className={form.mode === 'one-time' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
+              onClick={() => setForm((s) => ({ ...s, mode: 'one-time', frequency: '', customFrequency: '' }))}
+            >
+              One-timer
+            </button>
+            <button
+              type="button"
+              className={form.mode === 'repetitive' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
+              onClick={() => setForm((s) => ({ ...s, mode: 'repetitive', frequency: s.frequency || 'monthly' }))}
+            >
+              Repetitive
+            </button>
+          </div>
+
+          {form.mode === 'repetitive' && (
+            <>
+              <select
+                className="text-input"
+                value={form.frequency}
+                onChange={(e) => setForm((s) => ({ ...s, frequency: e.target.value as '' | ExpenseCadence }))}
+              >
+                <option value="">Frequency of purchase</option>
+                {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+
+              {form.frequency === 'custom' ? (
+                <input
+                  className="text-input"
+                  value={form.customFrequency}
+                  onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
+                  placeholder="Custom frequency (for example: every 45 days)"
+                  list={`custom-frequency-${bucket}`}
+                />
+              ) : (
+                <div className="text-xs font-semibold text-duored-muted">
+                  Frequency is reusable when you choose custom and save a label.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <button className="btn-duored mt-3" disabled={isPending} onClick={() => addExpense(bucket, form, setForm)} type="button">
+          Add expense
+        </button>
+
+        <h3 className="mb-2 mt-5 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">expense_list</h3>
+        {expenses.length === 0 ? (
+          <p className="font-semibold text-duored-muted">No expenses yet in this section.</p>
+        ) : (
+          <ul className="space-y-2">
+            {expenses.map((entry) => (
+              <ExpenseRow key={entry.id} item={entry} onRemove={(expenseId) => runMutation({ op: 'remove_expense', expenseId })} />
+            ))}
+          </ul>
+        )}
+
+        <datalist id={`custom-frequency-${bucket}`}>
+          {customFrequencyOptions.map((option) => (
+            <option key={`${bucket}-${option}`} value={option} />
+          ))}
+        </datalist>
+      </section>
+    );
   }
 
   return (
@@ -189,93 +388,22 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
 
       {mode === 'dashboard' && (
         <>
-          <section className="card-panel">
-            <h2 className="section-title">Add an expense</h2>
-            <div className="grid gap-2 md:grid-cols-2">
-              <input
-                className="text-input"
-                value={expenseForm.title}
-                onChange={(e) => setExpenseForm((s) => ({ ...s, title: e.target.value }))}
-                placeholder="Bread / Gym / Internet Bill / Car Fuel"
-              />
-              <input
-                className="text-input"
-                type="number"
-                min="0"
-                step="0.01"
-                value={expenseForm.amount}
-                onChange={(e) => setExpenseForm((s) => ({ ...s, amount: e.target.value }))}
-                placeholder="Amount"
-              />
-              <select
-                className="text-input"
-                value={expenseForm.category}
-                onChange={(e) => setExpenseForm((s) => ({ ...s, category: e.target.value as ExpenseCategory }))}
-              >
-                {EXPENSE_CATEGORIES.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="text-input"
-                value={expenseForm.frequency}
-                onChange={(e) => setExpenseForm((s) => ({ ...s, frequency: e.target.value as '' | ExpenseCadence }))}
-              >
-                <option value="">One-time (default)</option>
-                {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="text-input"
-                type="date"
-                value={expenseForm.spentOn}
-                onChange={(e) => setExpenseForm((s) => ({ ...s, spentOn: e.target.value }))}
-              />
-              <input
-                className="text-input"
-                value={expenseForm.notes}
-                onChange={(e) => setExpenseForm((s) => ({ ...s, notes: e.target.value }))}
-                placeholder="Optional notes"
-              />
-            </div>
-            <button
-              className="btn-duored mt-3"
-              disabled={isPending}
-              onClick={() => {
-                runMutation({
-                  op: 'add_expense',
-                  title: expenseForm.title,
-                  amount: Number(expenseForm.amount || '0'),
-                  category: expenseForm.category,
-                  frequency: expenseForm.frequency || undefined,
-                  spentOn: expenseForm.spentOn,
-                  notes: expenseForm.notes,
-                });
-                setExpenseForm((s) => ({ ...s, title: '', amount: '', notes: '', frequency: '' }));
-              }}
-              type="button"
-            >
-              Add expense
-            </button>
-          </section>
-
-          <section className="card-panel">
-            <h2 className="section-title">Expense list</h2>
-            {state.expenses.length === 0 ? (
-              <p className="font-semibold text-duored-muted">No expenses yet. Add your first one above.</p>
-            ) : (
-              <ul className="space-y-2">
-                {state.expenses.map((entry) => (
-                  <ExpenseRow key={entry.id} item={entry} onRemove={(expenseId) => runMutation({ op: 'remove_expense', expenseId })} />
-                ))}
-              </ul>
-            )}
-          </section>
+          <ExpenseEditor
+            bucket="predicted"
+            title="Predicted"
+            infoText="Use this for planned periodic expenses, including long-gap items like yearly car insurance."
+            form={predictedForm}
+            setForm={setPredictedForm}
+            expenses={predictedExpenses}
+          />
+          <ExpenseEditor
+            bucket="actual"
+            title="Actuals"
+            infoText="Use this for real spending logs: periodic expenses plus one-timers."
+            form={actualForm}
+            setForm={setActualForm}
+            expenses={actualExpenses}
+          />
         </>
       )}
 

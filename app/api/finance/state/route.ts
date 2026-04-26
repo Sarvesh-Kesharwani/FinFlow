@@ -4,7 +4,7 @@ import {
   setCookieFinanceStore,
 } from '@/lib/finance-store';
 import { normalizeMoney } from '@/lib/finance-math';
-import type { BuyListItem, ExpenseCadence, ExpenseCategory, ExpenseEntry, FinanceStore } from '@/lib/finance-types';
+import type { BuyListItem, ExpenseBucket, ExpenseCadence, ExpenseCategory, ExpenseEntry, FinanceStore } from '@/lib/finance-types';
 import { extractProductDetails } from '@/lib/product-extractor';
 
 function fail(message: string, status = 400) {
@@ -53,6 +53,11 @@ function normalizeCadence(value: string): ExpenseCadence {
   return allowed.has(v) ? v : 'one-time';
 }
 
+function normalizeExpenseBucket(value: string): ExpenseBucket {
+  const v = value.trim().toLowerCase();
+  return v === 'predicted' ? 'predicted' : 'actual';
+}
+
 async function persist(next: FinanceStore) {
   await setCookieFinanceStore(next);
   await markCookieStoreDirty();
@@ -92,6 +97,7 @@ export async function POST(req: Request) {
       id: id(),
       title,
       amount,
+      bucket: normalizeExpenseBucket(String(body.bucket ?? 'actual')),
       category: normalizeExpenseCategory(String(body.category ?? 'other')),
       cadence: normalizeCadence(String(body.frequency ?? body.cadence ?? 'one-time')),
       spentOn: new Date(String(body.spentOn ?? new Date().toISOString())).toISOString(),

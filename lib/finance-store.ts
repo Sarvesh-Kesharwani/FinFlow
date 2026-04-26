@@ -45,6 +45,7 @@ function normalizeExpense(entry: Partial<ExpenseEntry>): ExpenseEntry | null {
     id,
     title,
     amount: normalizeMoney(entry.amount),
+    bucket: entry.bucket === 'predicted' ? 'predicted' : 'actual',
     category,
     cadence,
     spentOn: new Date(spentOn).toISOString(),

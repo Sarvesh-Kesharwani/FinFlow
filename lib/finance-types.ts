@@ -10,11 +10,13 @@ export type ExpenseCategory =
   | 'other';
 
 export type ExpenseCadence = 'one-time' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom';
+export type ExpenseBucket = 'predicted' | 'actual';
 
 export interface ExpenseEntry {
   id: string;
   title: string;
   amount: number;
+  bucket: ExpenseBucket;
   category: ExpenseCategory;
   cadence: ExpenseCadence;
   spentOn: string; // ISO date

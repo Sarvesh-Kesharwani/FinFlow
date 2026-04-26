@@ -49,11 +49,13 @@ function canAffordThisMonth(sortedByPriority: BuyListItem[], budget: number): st
 
 export function summarizeFinance(store: FinanceStore): FinanceSummary {
   const monthlyIncome = clampMoney(toNumber(store.monthlyIncome));
+  const predictedExpenses = store.expenses.filter((expense) => expense.bucket === 'predicted');
+  const actualExpenses = store.expenses.filter((expense) => expense.bucket !== 'predicted');
   const monthlyExpectedExpenses = clampMoney(
-    store.expenses.reduce((sum, expense) => sum + expectedContribution(expense), 0),
+    predictedExpenses.reduce((sum, expense) => sum + expectedContribution(expense), 0),
   );
   const currentMonthSpent = clampMoney(
-    store.expenses.reduce((sum, expense) => sum + currentMonthContribution(expense), 0),
+    actualExpenses.reduce((sum, expense) => sum + currentMonthContribution(expense), 0),
   );
   const currentMonthRemaining = clampMoney(Math.max(0, monthlyIncome - currentMonthSpent));
   const affordableItemIds = canAffordThisMonth(store.buyList, currentMonthRemaining);
