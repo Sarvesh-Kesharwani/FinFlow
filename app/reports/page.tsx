@@ -39,15 +39,26 @@ export default async function ReportsPage() {
         <p className="font-semibold text-duored-muted">Quick monthly outlook for expected vs current spending.</p>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <article className="card-3d card-green">
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Monthly Income</p>
+          <p className="mt-2 text-2xl font-extrabold">{inr(state.monthlyIncome)}</p>
+        </article>
         <article className="card-3d card-amber">
-          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Expected Monthly</p>
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Expected / Month</p>
           <p className="mt-2 text-2xl font-extrabold">{inr(summary.monthlyExpectedExpenses)}</p>
         </article>
         <article className="card-3d card-rose">
-          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Current Month Spend</p>
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Spent This Month</p>
           <p className="mt-2 text-2xl font-extrabold">{inr(summary.currentMonthSpent)}</p>
         </article>
+        <article className="card-3d card-green">
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Can Buy This Month</p>
+          <p className="mt-2 text-2xl font-extrabold">{summary.canBuyCountThisMonth} items</p>
+        </article>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-1">
         <article className="card-3d card-green">
           <p className="text-xs uppercase tracking-[0.18em] opacity-75">Remaining This Month</p>
           <p className="mt-2 text-2xl font-extrabold">{inr(summary.currentMonthRemaining)}</p>

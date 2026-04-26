@@ -92,15 +92,6 @@ async function mutateFinance(payload: FinanceOp): Promise<FinanceStore> {
   return data.state as FinanceStore;
 }
 
-function StatCard({ label, value, tone = 'rose' }: { label: string; value: string; tone?: 'rose' | 'amber' | 'green' }) {
-  return (
-    <div className={`card-3d ${tone === 'amber' ? 'card-amber' : tone === 'green' ? 'card-green' : 'card-rose'}`}>
-      <p className="text-xs uppercase tracking-[0.18em] opacity-75">{label}</p>
-      <p className="mt-2 text-2xl font-extrabold">{value}</p>
-    </div>
-  );
-}
-
 function ExpenseRow({
   item,
   onRemove,
@@ -392,13 +383,6 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
 
   return (
     <div className="space-y-6">
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Monthly Income" value={formatMoney(state.monthlyIncome)} tone="green" />
-        <StatCard label="Expected / Month" value={formatMoney(summary.monthlyExpectedExpenses)} tone="amber" />
-        <StatCard label="Spent This Month" value={formatMoney(summary.currentMonthSpent)} tone="rose" />
-        <StatCard label="Can Buy This Month" value={`${summary.canBuyCountThisMonth} items`} tone="green" />
-      </section>
-
       {error && <p className="rounded-xl border-2 border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</p>}
 
       <section className="card-panel">
