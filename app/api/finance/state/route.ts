@@ -58,6 +58,18 @@ function normalizeExpenseBucket(value: string): ExpenseBucket {
   return v === 'predicted' ? 'predicted' : 'actual';
 }
 
+function toCamelCase(value: string): string {
+  const parts = value
+    .trim()
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part.toLowerCase());
+
+  if (parts.length === 0) return '';
+
+  return parts[0] + parts.slice(1).map((part) => part[0].toUpperCase() + part.slice(1)).join('');
+}
+
 async function persist(next: FinanceStore) {
   await setCookieFinanceStore(next);
   await markCookieStoreDirty();
@@ -88,7 +100,7 @@ export async function POST(req: Request) {
   }
 
   if (op === 'add_expense') {
-    const title = String(body.title ?? '').trim();
+    const title = toCamelCase(String(body.title ?? ''));
     if (!title) return fail('Expense title is required');
     const amount = normalizeMoney(body.amount);
     if (amount <= 0) return fail('Expense amount must be greater than 0');
