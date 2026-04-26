@@ -165,6 +165,142 @@ function BuyRow({
   );
 }
 
+function ExpenseEditor({
+  bucket,
+  title,
+  infoText,
+  form,
+  setForm,
+  expenses,
+  isPending,
+  customFrequencyOptions,
+  onAddExpense,
+  onRemoveExpense,
+}: {
+  bucket: ExpenseBucket;
+  title: string;
+  infoText?: string;
+  form: ExpenseFormState;
+  setForm: Dispatch<SetStateAction<ExpenseFormState>>;
+  expenses: ExpenseEntry[];
+  isPending: boolean;
+  customFrequencyOptions: string[];
+  onAddExpense: () => void;
+  onRemoveExpense: (expenseId: string) => void;
+}) {
+  const supportsFrequency = bucket === 'predicted';
+
+  return (
+    <section className="card-panel">
+      <div className="flex items-center gap-2">
+        <h2 className="section-title">{title}</h2>
+        {infoText && (
+          <button className="chip-soft h-6 w-6 p-0 text-center font-extrabold" type="button" title={infoText} aria-label={infoText}>
+            i
+          </button>
+        )}
+      </div>
+
+      <h3 className="mb-2 mt-1 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">add_expense</h3>
+      <div className="grid gap-2 md:grid-cols-2">
+        <input
+          className="text-input"
+          value={form.title}
+          onChange={(e) => setForm((s) => ({ ...s, title: e.target.value }))}
+          placeholder="Expense name"
+        />
+        <input
+          className="text-input"
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.amount}
+          onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))}
+          placeholder="Price"
+        />
+        {supportsFrequency && (
+          <>
+            <div className="flex items-center gap-2 rounded-xl border-2 border-duored-soft bg-white/80 px-3 py-2 md:col-span-2">
+              <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Type</span>
+              <button
+                type="button"
+                className={form.mode === 'one-time' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
+                onClick={() => setForm((s) => ({ ...s, mode: 'one-time', frequency: '', customFrequency: '' }))}
+              >
+                One-timer
+              </button>
+              <button
+                type="button"
+                className={form.mode === 'repetitive' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
+                onClick={() => setForm((s) => ({ ...s, mode: 'repetitive', frequency: s.frequency || 'monthly' }))}
+              >
+                Repetitive
+              </button>
+            </div>
+
+            {form.mode === 'repetitive' && (
+              <>
+                <select
+                  className="text-input"
+                  value={form.frequency}
+                  onChange={(e) => setForm((s) => ({ ...s, frequency: e.target.value as '' | ExpenseCadence }))}
+                >
+                  <option value="">Frequency of purchase</option>
+                  {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+
+                {form.frequency === 'custom' ? (
+                  <input
+                    className="text-input"
+                    value={form.customFrequency}
+                    onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
+                    placeholder="Custom frequency (for example: every 45 days)"
+                    list={`custom-frequency-${bucket}`}
+                  />
+                ) : (
+                  <div className="text-xs font-semibold text-duored-muted">
+                    Frequency is reusable when you choose custom and save a label.
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      <button className="btn-duored mt-3" disabled={isPending} onClick={onAddExpense} type="button">
+        Add expense
+      </button>
+
+      <h3 className="mb-2 mt-5 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">expense_list</h3>
+      {expenses.length === 0 ? (
+        <p className="font-semibold text-duored-muted">No expenses yet in this section.</p>
+      ) : (
+        <ul className="space-y-2">
+          {expenses.map((entry) => (
+            <ExpenseRow
+              key={entry.id}
+              item={entry}
+              onRemove={onRemoveExpense}
+              showFrequency={supportsFrequency}
+            />
+          ))}
+        </ul>
+      )}
+
+      <datalist id={`custom-frequency-${bucket}`}>
+        {customFrequencyOptions.map((option) => (
+          <option key={`${bucket}-${option}`} value={option} />
+        ))}
+      </datalist>
+    </section>
+  );
+}
+
 export function FinanceClient({ initialState, mode }: { initialState: FinanceStore; mode: 'dashboard' | 'wishlist' }) {
   const [state, setState] = useState(initialState);
   const [error, setError] = useState('');
@@ -245,134 +381,6 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     setForm(createExpenseForm);
   }
 
-  function ExpenseEditor({
-    bucket,
-    title,
-    infoText,
-    form,
-    setForm,
-    expenses,
-  }: {
-    bucket: ExpenseBucket;
-    title: string;
-    infoText?: string;
-    form: ExpenseFormState;
-    setForm: Dispatch<SetStateAction<ExpenseFormState>>;
-    expenses: ExpenseEntry[];
-  }) {
-    const supportsFrequency = bucket === 'predicted';
-
-    return (
-      <section className="card-panel">
-        <div className="flex items-center gap-2">
-          <h2 className="section-title">{title}</h2>
-          {infoText && (
-            <button className="chip-soft h-6 w-6 p-0 text-center font-extrabold" type="button" title={infoText} aria-label={infoText}>
-              i
-            </button>
-          )}
-        </div>
-
-        <h3 className="mb-2 mt-1 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">add_expense</h3>
-        <div className="grid gap-2 md:grid-cols-2">
-          <input
-            className="text-input"
-            value={form.title}
-            onChange={(e) => setForm((s) => ({ ...s, title: e.target.value }))}
-            placeholder="Expense name"
-          />
-          <input
-            className="text-input"
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.amount}
-            onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))}
-            placeholder="Price"
-          />
-          {supportsFrequency && (
-            <>
-              <div className="flex items-center gap-2 rounded-xl border-2 border-duored-soft bg-white/80 px-3 py-2 md:col-span-2">
-                <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Type</span>
-                <button
-                  type="button"
-                  className={form.mode === 'one-time' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
-                  onClick={() => setForm((s) => ({ ...s, mode: 'one-time', frequency: '', customFrequency: '' }))}
-                >
-                  One-timer
-                </button>
-                <button
-                  type="button"
-                  className={form.mode === 'repetitive' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
-                  onClick={() => setForm((s) => ({ ...s, mode: 'repetitive', frequency: s.frequency || 'monthly' }))}
-                >
-                  Repetitive
-                </button>
-              </div>
-
-              {form.mode === 'repetitive' && (
-                <>
-                  <select
-                    className="text-input"
-                    value={form.frequency}
-                    onChange={(e) => setForm((s) => ({ ...s, frequency: e.target.value as '' | ExpenseCadence }))}
-                  >
-                    <option value="">Frequency of purchase</option>
-                    {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  {form.frequency === 'custom' ? (
-                    <input
-                      className="text-input"
-                      value={form.customFrequency}
-                      onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
-                      placeholder="Custom frequency (for example: every 45 days)"
-                      list={`custom-frequency-${bucket}`}
-                    />
-                  ) : (
-                    <div className="text-xs font-semibold text-duored-muted">
-                      Frequency is reusable when you choose custom and save a label.
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </div>
-
-        <button className="btn-duored mt-3" disabled={isPending} onClick={() => addExpense(bucket, form, setForm)} type="button">
-          Add expense
-        </button>
-
-        <h3 className="mb-2 mt-5 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">expense_list</h3>
-        {expenses.length === 0 ? (
-          <p className="font-semibold text-duored-muted">No expenses yet in this section.</p>
-        ) : (
-          <ul className="space-y-2">
-            {expenses.map((entry) => (
-              <ExpenseRow
-                key={entry.id}
-                item={entry}
-                onRemove={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
-                showFrequency={supportsFrequency}
-              />
-            ))}
-          </ul>
-        )}
-
-        <datalist id={`custom-frequency-${bucket}`}>
-          {customFrequencyOptions.map((option) => (
-            <option key={`${bucket}-${option}`} value={option} />
-          ))}
-        </datalist>
-      </section>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -416,6 +424,10 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             form={predictedForm}
             setForm={setPredictedForm}
             expenses={predictedExpenses}
+            isPending={isPending}
+            customFrequencyOptions={customFrequencyOptions}
+            onAddExpense={() => addExpense('predicted', predictedForm, setPredictedForm)}
+            onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
           />
           <ExpenseEditor
             bucket="actual"
@@ -424,6 +436,10 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             form={actualForm}
             setForm={setActualForm}
             expenses={actualExpenses}
+            isPending={isPending}
+            customFrequencyOptions={customFrequencyOptions}
+            onAddExpense={() => addExpense('actual', actualForm, setActualForm)}
+            onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
           />
         </>
       )}
