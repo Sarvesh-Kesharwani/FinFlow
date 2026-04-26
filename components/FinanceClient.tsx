@@ -1,6 +1,7 @@
 'use client';
 
-import { type Dispatch, type SetStateAction, useMemo, useState, useTransition } from 'react';
+import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState, useTransition } from 'react';
+import { CsvImportButton } from '@/components/CsvImportButton';
 import { summarizeFinance } from '@/lib/finance-math';
 import {
   EXPENSE_CADENCE_OPTIONS,
@@ -73,6 +74,7 @@ type FinanceOp =
       notes?: string;
     }
   | { op: 'remove_expense'; expenseId: string }
+  | { op: 'bulk_add_expenses'; expenses: unknown[] }
   | { op: 'add_buy_item'; url: string; notes?: string }
   | { op: 'remove_buy_item'; itemId: string }
   | { op: 'move_buy_item'; itemId: string; direction: 'up' | 'down' };
@@ -175,6 +177,7 @@ function ExpenseEditor({
   customFrequencyOptions,
   onAddExpense,
   onRemoveExpense,
+  headerAction,
 }: {
   bucket: ExpenseBucket;
   title: string;
@@ -186,6 +189,7 @@ function ExpenseEditor({
   customFrequencyOptions: string[];
   onAddExpense: () => void;
   onRemoveExpense: (expenseId: string) => void;
+  headerAction?: ReactNode;
 }) {
   const supportsFrequency = bucket === 'predicted';
 
@@ -198,6 +202,7 @@ function ExpenseEditor({
             i
           </button>
         )}
+        {headerAction && <div className="ml-auto">{headerAction}</div>}
       </div>
 
       <h3 className="mb-2 mt-1 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">add_expense</h3>
@@ -310,6 +315,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [predictedForm, setPredictedForm] = useState(createExpenseForm);
   const [actualForm, setActualForm] = useState(createExpenseForm);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
+  const [importStatus, setImportStatus] = useState<string | null>(null);
   const predictedExpenses = useMemo(
     () => state.expenses.filter((entry) => entry.bucket === 'predicted'),
     [state.expenses],
@@ -407,6 +413,18 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             customFrequencyOptions={customFrequencyOptions}
             onAddExpense={() => addExpense('actual', actualForm, setActualForm)}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
+            headerAction={
+              <CsvImportButton
+                isPending={isPending}
+                status={importStatus}
+                onParsed={(expenses) => {
+                  if (expenses.length === 0) { setImportStatus('No valid expenses found.'); return; }
+                  setImportStatus(null);
+                  runMutation({ op: 'bulk_add_expenses', expenses });
+                  setImportStatus(`${expenses.length} imported`);
+                }}
+              />
+            }
           />
         </>
       )}

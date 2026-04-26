@@ -127,6 +127,34 @@ export async function POST(req: Request) {
     });
   }
 
+  if (op === 'bulk_add_expenses') {
+    const incoming = Array.isArray(body.expenses) ? (body.expenses as unknown[]) : [];
+    const existingKeys = new Set(state.expenses.map((e) => `${e.spentOn}|${e.title}|${e.amount}`));
+    const fresh: ExpenseEntry[] = [];
+    for (const raw of incoming) {
+      const r = raw as Record<string, unknown>;
+      const title = toTitleCase(String(r.title ?? ''));
+      if (!title) continue;
+      const amount = normalizeMoney(r.amount);
+      if (amount <= 0) continue;
+      const spentOn = String(r.spentOn ?? new Date().toISOString().slice(0, 10));
+      const key = `${spentOn}|${title}|${amount}`;
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      fresh.push({
+        id: id(),
+        title,
+        amount,
+        bucket: 'actual',
+        category: normalizeExpenseCategory(String(r.category ?? 'other')),
+        cadence: 'one-time',
+        spentOn,
+        notes: String(r.notes ?? '').trim() || undefined,
+      });
+    }
+    return persist({ ...state, expenses: [...fresh, ...state.expenses] });
+  }
+
   if (op === 'add_buy_item') {
     const url = String(body.url ?? '').trim();
     let title = String(body.title ?? '').trim();
