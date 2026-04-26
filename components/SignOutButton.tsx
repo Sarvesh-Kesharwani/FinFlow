@@ -4,7 +4,10 @@ export function SignOutButton({ action }: { action: () => Promise<void> }) {
   return (
     <button
       type="submit"
-      onClick={() => sessionStorage.removeItem('tubeo_drive_pulled')}
+      onClick={() => {
+        sessionStorage.removeItem('tubeo_drive_pulled');
+        sessionStorage.removeItem('finance_drive_pulled');
+      }}
       formAction={action}
       className="flex items-center gap-1"
     >

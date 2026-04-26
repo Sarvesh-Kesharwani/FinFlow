@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { FINANCE_CHANGED_EVENT } from '@/components/FinanceClient';
 
 type SyncState = 'loading' | 'synced' | 'unsynced' | 'syncing' | 'no-auth';
 
-const PULLED_KEY = 'tubeo_drive_pulled';
-const CHANNELS_CHANGED_EVENT = 'tubeo-channels-changed';
+const PULLED_KEY = 'finance_drive_pulled';
 
 export function SyncButton() {
   const router = useRouter();
@@ -21,15 +21,17 @@ export function SyncButton() {
 
     try {
       const r = await fetch('/api/drive/sync');
-      if (r.status === 401) { setState('no-auth'); return; }
-      if (!r.ok) { setState('unsynced'); return; }
+      if (r.status === 401) {
+        setState('no-auth');
+        return;
+      }
+      if (!r.ok) {
+        setState('unsynced');
+        return;
+      }
       const data = await r.json();
       setState(data.synced ? 'synced' : 'unsynced');
-      if (data.updatedAt) {
-        setLastSynced(data.updatedAt);
-      } else {
-        setLastSynced(null);
-      }
+      setLastSynced(data.updatedAt || null);
     } catch {
       setState('unsynced');
     } finally {
@@ -37,38 +39,44 @@ export function SyncButton() {
     }
   }, []);
 
-  const pushSync = useCallback(async (background = false) => {
-    if (syncingRef.current) return;
-    syncingRef.current = true;
+  const pushSync = useCallback(
+    async (background = false) => {
+      if (syncingRef.current) return;
+      syncingRef.current = true;
 
-    if (!background) {
-      setState('syncing');
-    }
+      if (!background) setState('syncing');
 
-    try {
-      const r = await fetch('/api/drive/sync', { method: 'POST' });
-      if (r.status === 401) { setState('no-auth'); return; }
-      if (!r.ok) { setState('unsynced'); return; }
-      const data = await r.json();
-      if (data.initialized || data.driveWins || data.seededFromLocal) {
-        sessionStorage.setItem(PULLED_KEY, '1');
-        setLastSynced(data.updatedAt ?? new Date().toISOString());
-        setState('synced');
-        if (data.replacedLocal || data.seededFromLocal) {
-          router.refresh();
+      try {
+        const r = await fetch('/api/drive/sync', { method: 'POST' });
+        if (r.status === 401) {
+          setState('no-auth');
+          return;
         }
-        return;
+        if (!r.ok) {
+          setState('unsynced');
+          return;
+        }
+        const data = await r.json();
+        if (data.initialized || data.driveWins || data.seededFromLocal) {
+          sessionStorage.setItem(PULLED_KEY, '1');
+          setLastSynced(data.updatedAt || new Date().toISOString());
+          setState('synced');
+          if (data.replacedLocal || data.seededFromLocal) {
+            router.refresh();
+          }
+          return;
+        }
+        setLastSynced(data.updatedAt || new Date().toISOString());
+        setState('synced');
+      } catch {
+        setState('unsynced');
+      } finally {
+        syncingRef.current = false;
       }
-      setLastSynced(data.updatedAt ?? new Date().toISOString());
-      setState('synced');
-    } catch {
-      setState('unsynced');
-    } finally {
-      syncingRef.current = false;
-    }
-  }, [router]);
+    },
+    [router],
+  );
 
-  // On mount: pull Drive -> cookie only once per login session.
   useEffect(() => {
     if (sessionStorage.getItem(PULLED_KEY)) {
       void checkSync();
@@ -77,8 +85,14 @@ export function SyncButton() {
 
     fetch('/api/drive/sync', { method: 'PUT' })
       .then((r) => {
-        if (r.status === 401) { setState('no-auth'); return; }
-        if (!r.ok) { setState('unsynced'); return; }
+        if (r.status === 401) {
+          setState('no-auth');
+          return;
+        }
+        if (!r.ok) {
+          setState('unsynced');
+          return;
+        }
         sessionStorage.setItem(PULLED_KEY, '1');
         void checkSync();
         router.refresh();
@@ -87,7 +101,7 @@ export function SyncButton() {
   }, [checkSync, router]);
 
   useEffect(() => {
-    const onChannelsChanged = (event: Event) => {
+    const onFinanceChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ autoSync?: boolean }>).detail;
       setLastSynced(null);
       setState('unsynced');
@@ -99,11 +113,10 @@ export function SyncButton() {
       }
     };
 
-    window.addEventListener(CHANNELS_CHANGED_EVENT, onChannelsChanged);
-    return () => window.removeEventListener(CHANNELS_CHANGED_EVENT, onChannelsChanged);
+    window.addEventListener(FINANCE_CHANGED_EVENT, onFinanceChanged);
+    return () => window.removeEventListener(FINANCE_CHANGED_EVENT, onFinanceChanged);
   }, [checkSync, pushSync]);
 
-  // Poll every 30s
   useEffect(() => {
     if (state === 'no-auth') return;
     const id = setInterval(() => void checkSync(), 30_000);
@@ -114,13 +127,12 @@ export function SyncButton() {
 
   const isSynced = state === 'synced';
   const isSyncing = state === 'syncing' || state === 'loading';
-
-  const label = isSyncing ? '↻' : isSynced ? '●' : '●';
+  const icon = isSyncing ? '↻' : '●';
   const title = isSyncing
     ? 'Syncing with Google Drive...'
     : isSynced
-    ? `Synced with Drive${lastSynced ? ' · ' + new Date(lastSynced).toLocaleTimeString() : ''}`
-    : 'Not synced - click to sync now';
+      ? `Synced with Drive${lastSynced ? ' · ' + new Date(lastSynced).toLocaleTimeString() : ''}`
+      : 'Not synced - click to sync now';
 
   return (
     <button
@@ -129,12 +141,12 @@ export function SyncButton() {
       disabled={isSyncing}
       className={[
         'chip text-lg leading-none transition-colors',
-        isSyncing ? 'text-duo-ink/30 cursor-wait' : '',
-        isSynced ? 'text-duo-green border-duo-green cursor-default' : '',
-        !isSynced && !isSyncing ? 'text-red-500 border-red-300 hover:bg-red-50 cursor-pointer' : '',
+        isSyncing ? 'cursor-wait text-duored-ink/35' : '',
+        isSynced ? 'cursor-default border-emerald-300 text-emerald-600' : '',
+        !isSynced && !isSyncing ? 'cursor-pointer border-red-300 text-red-500 hover:bg-red-50' : '',
       ].join(' ')}
     >
-      <span className={isSyncing ? 'animate-spin inline-block' : ''}>{label}</span>
+      <span className={isSyncing ? 'inline-block animate-spin' : ''}>{icon}</span>
     </button>
   );
 }

@@ -3,28 +3,86 @@
 @tailwind utilities;
 
 @layer base {
-  html, body {
-    @apply bg-duo-bg text-duo-ink font-display antialiased;
+  html,
+  body {
+    @apply bg-[#fff7f8] text-duored-ink font-display antialiased;
   }
-  button { @apply select-none; }
+
+  button {
+    @apply select-none;
+  }
 }
 
 @layer components {
-  .btn-duo {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-chonk font-bold uppercase tracking-wide text-sm transition-transform active:translate-y-[2px] active:shadow-none;
+  .bg-orbs {
+    @apply pointer-events-none fixed inset-0 -z-10;
+    background:
+      radial-gradient(700px circle at 10% -10%, rgba(228, 61, 77, 0.12), transparent 60%),
+      radial-gradient(600px circle at 85% 0%, rgba(245, 114, 126, 0.18), transparent 60%),
+      linear-gradient(180deg, #fffafb 0%, #fff3f5 100%);
   }
-  .btn-duo-green  { @apply btn-duo bg-duo-green text-white shadow-duoGreen hover:brightness-105; }
-  .btn-duo-blue   { @apply btn-duo bg-duo-blue  text-white shadow-duoBlue  hover:brightness-105; }
-  .btn-duo-ghost  { @apply btn-duo bg-white text-duo-ink border-2 border-duo-border shadow-card hover:bg-duo-soft; }
+
+  .btn-duo {
+    @apply inline-flex items-center justify-center gap-2 rounded-chonk px-4 py-2 text-sm font-extrabold uppercase tracking-wide transition-transform active:translate-y-[2px] active:shadow-none;
+  }
+
+  .btn-duo-green {
+    @apply btn-duo bg-duo-green text-white shadow-duoGreen hover:brightness-105;
+  }
+
+  .btn-duored {
+    @apply btn-duo bg-duored-main text-white shadow-duored hover:brightness-105 disabled:cursor-wait disabled:opacity-70;
+  }
 
   .chip {
-    @apply inline-flex items-center gap-1 px-3 py-1.5 rounded-full border-2 border-duo-border bg-white text-sm font-bold text-duo-ink hover:bg-duo-soft cursor-pointer;
+    @apply inline-flex cursor-pointer items-center gap-1 rounded-full border-2 border-duored-border bg-white px-3 py-1.5 text-sm font-bold text-duored-ink hover:bg-duored-soft;
   }
-  .chip-active {
-    @apply bg-duo-green/10 border-duo-green text-duo-greenDark;
+
+  .chip-soft {
+    @apply rounded-full border-2 border-duored-border bg-white px-2.5 py-1 text-sm font-bold text-duored-ink disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .chip-price {
+    @apply rounded-full border-2 border-amber-200 bg-amber-50 px-3 py-1 text-sm font-extrabold text-amber-700;
+  }
+
+  .chip-danger {
+    @apply rounded-full border-2 border-red-200 bg-red-50 px-3 py-1 text-sm font-bold text-red-600 hover:bg-red-100;
+  }
+
+  .card-panel {
+    @apply rounded-chonk border-2 border-duored-border bg-white p-5 shadow-roseCard;
+  }
+
+  .card-3d {
+    @apply rounded-chonk border-2 p-4 text-white shadow-[0_4px_0_0_rgba(0,0,0,0.18)];
+  }
+
+  .card-rose {
+    @apply border-rose-300 bg-gradient-to-br from-[#ef6070] to-[#d83648];
+  }
+
+  .card-amber {
+    @apply border-amber-300 bg-gradient-to-br from-[#f3ab35] to-[#e5861d];
+  }
+
+  .card-green {
+    @apply border-emerald-300 bg-gradient-to-br from-[#24b772] to-[#139f61];
+  }
+
+  .lift-card {
+    @apply flex items-center justify-between gap-3 rounded-2xl border-2 border-duored-border bg-white px-4 py-3 shadow-[0_3px_0_0_#f5d6da];
+  }
+
+  .section-title {
+    @apply mb-3 text-xl font-extrabold text-duored-deep;
+  }
+
+  .text-input {
+    @apply rounded-xl border-2 border-duored-border bg-white px-3 py-2 font-semibold text-duored-ink outline-none transition-colors focus:border-duored-main;
   }
 
   .card {
-    @apply bg-white rounded-chonk border-2 border-duo-border shadow-card overflow-hidden;
+    @apply overflow-hidden rounded-chonk border-2 border-duored-border bg-white shadow-roseCard;
   }
 }

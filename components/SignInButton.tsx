@@ -23,7 +23,7 @@ export function SignInButton() {
         }
       }}
     >
-      <span aria-hidden>{pending ? '...' : 'KEY'}</span> {pending ? 'Redirecting...' : 'Sign in'}
+      <span aria-hidden>{pending ? '...' : '🔐'}</span> {pending ? 'Redirecting...' : 'Sign in'}
     </button>
   );
 }

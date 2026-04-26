@@ -1,0 +1,12 @@
+# one time instructions:
+## just paste these instructions to first ai session as it is:
+    1. create a new repo on github with name "", and push all changes.
+    2. create 3 branches dev, prod, exp on github repo. set dev as default branch.
+    3. create new project on vercel, change settings to pick new commits from prod branch.
+    4. 
+
+# maintainance instructions:
+1. start a new session with /caveman ultra.
+2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.
+3. 
+

@@ -1,31 +1,34 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 
 const TABS = [
-  { href: '/',         label: 'Mixed',    emoji: '🎬' },
-  { href: '/channels', label: 'Channels', emoji: '📺' },
+  { href: '/', label: 'Dashboard', emoji: '💰' },
+  { href: '/wishlist', label: 'To Buy', emoji: '🛍️' },
+  { href: '/reports', label: 'Reports', emoji: '📈' },
 ];
 
 export function NavTabs() {
   const pathname = usePathname();
-  const sp = useSearchParams();
-  const qs = sp.toString();
 
   return (
-    <nav className="flex gap-2">
-      {TABS.map((t) => {
-        const active = pathname === t.href;
-        const href = qs ? `${t.href}?${qs}` : t.href;
+    <nav className="flex flex-wrap gap-2">
+      {TABS.map((tab) => {
+        const active = pathname === tab.href;
         return (
           <Link
-            key={t.href}
-            href={href}
-            className={`btn-duo ${active ? 'bg-duo-green text-white shadow-duoGreen' : 'bg-white text-duo-ink border-2 border-duo-border shadow-card'}`}
+            key={tab.href}
+            href={tab.href}
+            className={[
+              'btn-duo',
+              active
+                ? 'bg-duored-main text-white shadow-duored'
+                : 'bg-white text-duored-ink border-2 border-duored-border shadow-card',
+            ].join(' ')}
           >
-            <span aria-hidden>{t.emoji}</span>
-            <span>{t.label}</span>
+            <span aria-hidden>{tab.emoji}</span>
+            <span>{tab.label}</span>
           </Link>
         );
       })}

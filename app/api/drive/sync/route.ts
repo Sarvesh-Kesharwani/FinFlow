@@ -1,94 +1,73 @@
-import { readDriveChannels, writeDriveChannels } from '@/lib/drive';
+import { readDriveFinanceStore, writeDriveFinanceStore } from '@/lib/finance-drive';
 import {
-  getCookieChannelSyncMeta,
-  getCookieChannelStore,
+  getCookieFinanceStore,
+  getCookieSyncMeta,
   hasDriveSyncHydrated,
-  markCookieChannelStoreSynced,
+  markCookieStoreSynced,
   markDriveSyncHydrated,
-  setCookieChannelStore,
-} from '@/lib/channels-cookie';
+  setCookieFinanceStore,
+} from '@/lib/finance-store';
 import { getSession } from '@/lib/session';
-import type { ChannelPreferenceStore } from '@/lib/types';
-import { getEnvChannelIds } from '@/lib/whitelist';
-import { DEFAULT_VIEW_PREFERENCES, sameViewPreferences } from '@/lib/view-preferences';
+import type { FinanceStore } from '@/lib/finance-types';
 
-// GET - read Drive, return { driveIds, cookieIds, synced }
+function sameStore(a: FinanceStore, b: FinanceStore): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export async function GET() {
   const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  let cookieStore: ChannelPreferenceStore = { channels: [], spaces: [], view: DEFAULT_VIEW_PREFERENCES };
+  let cookieStore: FinanceStore = { monthlyIncome: 0, expenses: [], buyList: [] };
   let driveData = null;
   let localMeta = { updatedAt: null as string | null, dirty: false };
   try {
     [cookieStore, driveData, localMeta] = await Promise.all([
-      getCookieChannelStore(),
-      readDriveChannels(session.accessToken),
-      getCookieChannelSyncMeta(),
+      getCookieFinanceStore(),
+      readDriveFinanceStore(session.accessToken),
+      getCookieSyncMeta(),
     ]);
   } catch {
     return Response.json({ error: 'Failed to read Drive sync state' }, { status: 502 });
   }
 
-  const driveChannels = driveData?.channels ?? [];
-  const driveSpaces = driveData?.spaces ?? [];
-  const envIds = getEnvChannelIds();
-  const cookieOnly = cookieStore.channels.filter((channel) => !envIds.includes(channel.id));
-  const syncedChannels =
-    cookieOnly.length === driveChannels.length &&
-    cookieOnly.every((channel, index) =>
-      driveChannels[index]?.id === channel.id && driveChannels[index]?.space === channel.space,
-    );
-  const syncedSpaces =
-    cookieStore.spaces.length === driveSpaces.length &&
-    cookieStore.spaces.every((space, index) => driveSpaces[index] === space);
-  const syncedView = sameViewPreferences(cookieStore.view, driveData?.view ?? cookieStore.view);
+  const driveStore: FinanceStore = driveData
+    ? { monthlyIncome: driveData.monthlyIncome, expenses: driveData.expenses, buyList: driveData.buyList }
+    : { monthlyIncome: 0, expenses: [], buyList: [] };
 
   return Response.json({
-    driveIds: driveChannels.map((channel) => channel.id),
-    cookieIds: cookieStore.channels.map((channel) => channel.id),
+    driveItems: driveStore.buyList.length,
+    localItems: cookieStore.buyList.length,
     initialized: await hasDriveSyncHydrated(),
-    synced: syncedChannels && syncedSpaces && syncedView && !localMeta.dirty,
+    synced: sameStore(cookieStore, driveStore) && !localMeta.dirty,
     updatedAt: driveData?.updatedAt ?? null,
   });
 }
 
-// POST /api/drive/sync - push local cookie channels to Drive (manual sync by user)
 export async function POST() {
   const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  const cookieStore = await getCookieChannelStore();
-  const localMeta = await getCookieChannelSyncMeta();
-  const envIds = getEnvChannelIds();
-  const cookieOnly = cookieStore.channels.filter((channel) => !envIds.includes(channel.id));
-  const localSpaces = cookieStore.spaces;
-  const localView = cookieStore.view;
+  const cookieStore = await getCookieFinanceStore();
+  const localMeta = await getCookieSyncMeta();
 
   try {
-    const driveData = await readDriveChannels(session.accessToken);
+    const driveData = await readDriveFinanceStore(session.accessToken);
 
     if (driveData && !localMeta.dirty) {
-      const driveOnly = driveData.channels.filter((channel) => !envIds.includes(channel.id));
-      const replacedLocal =
-        cookieOnly.length !== driveOnly.length ||
-        cookieOnly.some((channel, index) =>
-          driveOnly[index]?.id !== channel.id || driveOnly[index]?.space !== channel.space,
-        ) ||
-        localSpaces.length !== driveData.spaces.length ||
-        localSpaces.some((space, index) => driveData.spaces[index] !== space) ||
-        !sameViewPreferences(localView, driveData.view);
+      const driveStore: FinanceStore = {
+        monthlyIncome: driveData.monthlyIncome,
+        expenses: driveData.expenses,
+        buyList: driveData.buyList,
+      };
+      const replacedLocal = !sameStore(cookieStore, driveStore);
 
-      await setCookieChannelStore({
-        channels: driveOnly,
-        spaces: driveData.spaces,
-        view: driveData.view,
-      });
-      await markCookieChannelStoreSynced(driveData.updatedAt);
+      await setCookieFinanceStore(driveStore);
+      await markCookieStoreSynced(driveData.updatedAt);
       await markDriveSyncHydrated();
 
       return Response.json({
@@ -97,18 +76,11 @@ export async function POST() {
         driveWins: true,
         replacedLocal,
         updatedAt: driveData.updatedAt,
-        channelIds: driveData.channels.map((channel) => channel.id),
       });
     }
 
-    const syncedAt = new Date().toISOString();
-    await writeDriveChannels(session.accessToken, {
-      channels: cookieOnly,
-      spaces: localSpaces,
-      view: localView,
-      quota: driveData?.quota,
-    });
-    await markCookieChannelStoreSynced(syncedAt);
+    const syncedAt = await writeDriveFinanceStore(session.accessToken, cookieStore);
+    await markCookieStoreSynced(syncedAt);
     await markDriveSyncHydrated();
 
     return Response.json({
@@ -116,14 +88,12 @@ export async function POST() {
       initialized: true,
       seededFromLocal: true,
       updatedAt: syncedAt,
-      channelIds: cookieOnly.map((channel) => channel.id),
     });
   } catch {
     return Response.json({ error: 'Failed to write Drive sync state' }, { status: 502 });
   }
 }
 
-// PUT /api/drive/sync - pull Drive channels into cookie (called on login, Drive wins)
 export async function PUT() {
   const session = await getSession();
   if (!session?.accessToken) {
@@ -132,23 +102,22 @@ export async function PUT() {
 
   let driveData = null;
   try {
-    driveData = await readDriveChannels(session.accessToken);
+    driveData = await readDriveFinanceStore(session.accessToken);
   } catch {
-    return Response.json({ error: 'Failed to pull channels from Drive' }, { status: 502 });
+    return Response.json({ error: 'Failed to pull finance data from Drive' }, { status: 502 });
   }
 
   if (!driveData) {
     await markDriveSyncHydrated();
-    return Response.json({ ok: true, initialized: true, channelIds: [] });
+    return Response.json({ ok: true, initialized: true });
   }
 
-  const envIds = getEnvChannelIds();
-  await setCookieChannelStore({
-    channels: driveData.channels.filter((channel) => !envIds.includes(channel.id)),
-    spaces: driveData.spaces,
-    view: driveData.view,
+  await setCookieFinanceStore({
+    monthlyIncome: driveData.monthlyIncome,
+    expenses: driveData.expenses,
+    buyList: driveData.buyList,
   });
-  await markCookieChannelStoreSynced(driveData.updatedAt);
+  await markCookieStoreSynced(driveData.updatedAt);
   await markDriveSyncHydrated();
-  return Response.json({ ok: true, initialized: true, channelIds: driveData.channels.map((channel) => channel.id) });
+  return Response.json({ ok: true, initialized: true });
 }

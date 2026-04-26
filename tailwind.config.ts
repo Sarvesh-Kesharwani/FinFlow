@@ -20,6 +20,15 @@ const config: Config = {
           mute: '#AFAFAF',
           border: '#E5E5E5',
         },
+        duored: {
+          main: '#E43D4D',
+          deep: '#BD2737',
+          ink: '#3A1017',
+          soft: '#FFF4F5',
+          border: '#F3BCC2',
+          muted: '#9E5A62',
+          link: '#B12C3A',
+        },
       },
       borderRadius: {
         chonk: '1.25rem',
@@ -30,6 +39,8 @@ const config: Config = {
         duoGreen: '0 4px 0 0 #58A700',
         duoBlue: '0 4px 0 0 #0A8CC7',
         card: '0 2px 0 0 #E5E5E5',
+        duored: '0 5px 0 0 #BD2737',
+        roseCard: '0 3px 0 0 #F3BCC2',
       },
       fontFamily: {
         display: ['"Nunito"', 'system-ui', 'sans-serif'],
