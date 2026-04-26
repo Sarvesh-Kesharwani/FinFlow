@@ -51,6 +51,15 @@ function parseCustomFrequency(notes?: string): string {
   return normalized.slice(CUSTOM_FREQ_PREFIX.length).trim();
 }
 
+function formatExpenseTitle(title: string): string {
+  return title
+    .trim()
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
 type FinanceOp =
   | { op: 'set_income'; monthlyIncome: number }
   | {
@@ -108,7 +117,7 @@ function ExpenseRow({
   return (
     <li className="lift-card">
       <div className="min-w-0">
-        <p className="truncate font-extrabold text-duored-ink">{item.title}</p>
+        <p className="truncate font-extrabold text-duored-ink">{formatExpenseTitle(item.title)}</p>
         <div className="text-xs text-duored-muted">
           {showFrequency && <p>Freq: {frequencyLabel}</p>}
           <p>{new Date(item.spentOn).toLocaleDateString()}</p>
