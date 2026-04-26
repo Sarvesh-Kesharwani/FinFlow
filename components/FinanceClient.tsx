@@ -61,7 +61,6 @@ function formatExpenseTitle(title: string): string {
 }
 
 type FinanceOp =
-  | { op: 'set_income'; monthlyIncome: number }
   | {
       op: 'add_expense';
       title: string;
@@ -311,8 +310,6 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [predictedForm, setPredictedForm] = useState(createExpenseForm);
   const [actualForm, setActualForm] = useState(createExpenseForm);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
-  const [incomeInput, setIncomeInput] = useState(String(state.monthlyIncome || ''));
-
   const predictedExpenses = useMemo(
     () => state.expenses.filter((entry) => entry.bucket === 'predicted'),
     [state.expenses],
@@ -384,29 +381,6 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   return (
     <div className="space-y-6">
       {error && <p className="rounded-xl border-2 border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</p>}
-
-      <section className="card-panel">
-        <h2 className="section-title">Monthly income</h2>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            className="text-input"
-            type="number"
-            min="0"
-            step="0.01"
-            value={incomeInput}
-            onChange={(e) => setIncomeInput(e.target.value)}
-            placeholder="e.g. 80000"
-          />
-          <button
-            className="btn-duored"
-            disabled={isPending}
-            onClick={() => runMutation({ op: 'set_income', monthlyIncome: Number(incomeInput || '0') })}
-            type="button"
-          >
-            Save income
-          </button>
-        </div>
-      </section>
 
       {mode === 'dashboard' && (
         <>

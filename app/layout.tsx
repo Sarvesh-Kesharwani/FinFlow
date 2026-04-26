@@ -29,6 +29,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Suspense fallback={null}>
                 <NavTabs />
               </Suspense>
+              <Link
+                href="/settings"
+                className="btn-duo bg-white text-duored-ink border-2 border-duored-border shadow-card"
+                aria-label="Settings"
+              >
+                <span aria-hidden>⚙️</span>
+              </Link>
               <SyncButton />
               <Suspense fallback={null}>
                 <AuthButton />
