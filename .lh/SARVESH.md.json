@@ -1,0 +1,58 @@
+{
+    "sourceFile": "SARVESH.md",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 10,
+            "patches": [
+                {
+                    "date": 1777212232624,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                },
+                {
+                    "date": 1777212250329,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,2 +1,2 @@\n 1. start a new session with /caveman ultra.\r\n-2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it.\r\n+2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat.\r\n"
+                },
+                {
+                    "date": 1777212269410,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,2 +1,2 @@\n 1. start a new session with /caveman ultra.\r\n-2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat.\r\n+2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n"
+                },
+                {
+                    "date": 1777212674770,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,2 +1,9 @@\n+# one time instructions:\r\n+\r\n+\r\n+# maintainance instructions:\r\n 1. start a new session with /caveman ultra.\r\n 2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n+3. command to ai: `create a new repo on github with name \"\", and push all changes.\r\n+4. \r\n+\r\n"
+                },
+                {
+                    "date": 1777212739247,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,9 +1,10 @@\n # one time instructions:\r\n+1. command to ai: `create a new repo on github with name \"\", and push all changes.\r\n+2. create 3 branches dev, prod, exp on github repo.\r\n+3. create new project on vercel, change settings to pick new commits from prod branche.\r\n \r\n-\r\n # maintainance instructions:\r\n 1. start a new session with /caveman ultra.\r\n 2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n-3. command to ai: `create a new repo on github with name \"\", and push all changes.\r\n 4. \r\n \r\n"
+                },
+                {
+                    "date": 1777212744781,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -5,6 +5,6 @@\n \r\n # maintainance instructions:\r\n 1. start a new session with /caveman ultra.\r\n 2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n-4. \r\n+3. \r\n \r\n"
+                },
+                {
+                    "date": 1777212792831,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,8 +1,9 @@\n # one time instructions:\r\n 1. command to ai: `create a new repo on github with name \"\", and push all changes.\r\n 2. create 3 branches dev, prod, exp on github repo.\r\n 3. create new project on vercel, change settings to pick new commits from prod branche.\r\n+4. set dev as default branch on github repo.\r\n \r\n # maintainance instructions:\r\n 1. start a new session with /caveman ultra.\r\n 2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n"
+                },
+                {
+                    "date": 1777212806125,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,9 +1,10 @@\n # one time instructions:\r\n-1. command to ai: `create a new repo on github with name \"\", and push all changes.\r\n+1. create a new repo on github with name \"\", and push all changes.\r\n 2. create 3 branches dev, prod, exp on github repo.\r\n 3. create new project on vercel, change settings to pick new commits from prod branche.\r\n 4. set dev as default branch on github repo.\r\n+5. \r\n \r\n # maintainance instructions:\r\n 1. start a new session with /caveman ultra.\r\n 2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n"
+                },
+                {
+                    "date": 1777212832569,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,5 +1,6 @@\n # one time instructions:\r\n+## just paste these instructions to first ai session as it is:\r\n 1. create a new repo on github with name \"\", and push all changes.\r\n 2. create 3 branches dev, prod, exp on github repo.\r\n 3. create new project on vercel, change settings to pick new commits from prod branche.\r\n 4. set dev as default branch on github repo.\r\n"
+                },
+                {
+                    "date": 1777212858580,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,11 +1,11 @@\n # one time instructions:\r\n ## just paste these instructions to first ai session as it is:\r\n-1. create a new repo on github with name \"\", and push all changes.\r\n-2. create 3 branches dev, prod, exp on github repo.\r\n-3. create new project on vercel, change settings to pick new commits from prod branche.\r\n-4. set dev as default branch on github repo.\r\n-5. \r\n+    1. create a new repo on github with name \"\", and push all changes.\r\n+    2. create 3 branches dev, prod, exp on github repo. set dev as default branch on github repo.\r\n+    3. create new project on vercel, change settings to pick new commits from prod branch.\r\n+    4. \r\n+    5. \r\n \r\n # maintainance instructions:\r\n 1. start a new session with /caveman ultra.\r\n 2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n"
+                },
+                {
+                    "date": 1777212863848,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,11 +1,10 @@\n # one time instructions:\r\n ## just paste these instructions to first ai session as it is:\r\n     1. create a new repo on github with name \"\", and push all changes.\r\n-    2. create 3 branches dev, prod, exp on github repo. set dev as default branch on github repo.\r\n+    2. create 3 branches dev, prod, exp on github repo. set dev as default branch.\r\n     3. create new project on vercel, change settings to pick new commits from prod branch.\r\n     4. \r\n-    5. \r\n \r\n # maintainance instructions:\r\n 1. start a new session with /caveman ultra.\r\n 2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it, instead of manually explanining it in chat. with issue syou can add image evidences of issues etc.\r\n"
+                }
+            ],
+            "date": 1777212232624,
+            "name": "Commit-0",
+            "content": "1. start a new session with /caveman ultra.\r\n2. open issues for every feature_addition or bug_fix, and ask code_assitant to work on it.\r\n"
+        }
+    ]
+}

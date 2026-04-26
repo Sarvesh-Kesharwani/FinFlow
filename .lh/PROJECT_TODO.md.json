@@ -1,0 +1,18 @@
+{
+    "sourceFile": "PROJECT_TODO.md",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 0,
+            "patches": [
+                {
+                    "date": 1777214167445,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                }
+            ],
+            "date": 1777214167445,
+            "name": "Commit-0",
+            "content": "# FinFlow Project TODO\n\nThis file tracks:\n\n- open issues\n- upcoming features\n- completed tasks\n\n## Working Rules\n\n1. Break work into small tasks.\n2. Prioritize in this order: `P0 Core Issues` -> `P1 Core Features` -> `P2 UI/Polish`.\n3. For every code change, update this file and commit to `dev`.\n\n## P0 Core Issues (Highest Priority)\n\n- [X] `ISSUE-001` Investigate and harden startup flow for post-build \"Internal Server Error\" cases.\n- [X] `ISSUE-002` Add a stable post-build health-check checklist (`/` and key API routes).\n\n## P1 Core Features\n\n- [X] `EXP-001` Add optional frequency in Actual Add Expense (daily/weekly/monthly/yearly/custom) with default one-time fallback.\n- [ ] `EXP-002` Add edit support for existing expense frequency.\n- [ ] `EXP-003` Add filtering/grouping in expense list by frequency.\n- [X] `OPS-001` Create new GitHub repo `FinFlow` and push full branch history (`dev`, `prod`).\n\n## P2 UI/Polish\n\n- [ ] `UI-001` Improve frequency selector helper text and tooltip clarity.\n- [ ] `UI-002` Improve expense list badges/chips for cadence readability.\n- [X] `UI-003` Update favicon to FinFlow logo mark.\n\n## Completed Tasks Log\n\n| Date (IST) | Task ID   | Summary                                                                                                                      | Commit                                                                |\n| ---------- | --------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |\n| 2026-04-26 | ISSUE-002 | Added `npm run health:postbuild` script with route status checks and documented the checklist for post-build verification. | `chore(health): add post-build route checklist`                     |\n| 2026-04-26 | EXP-001   | Added optional frequency in Actual Add Expense, kept one-time as default, and preserved old entries compatibility.           | `feat(expense): add frequency options and add project todo tracker` |\n| 2026-04-26 | OPS-001   | Created `Sarvesh-Kesharwani/FinFlow`, pushed `dev`, and pushed `prod` history branch.                                  | `chore(project): log FinFlow repo creation and sync`                |\n| 2026-04-26 | UI-003    | Replaced old favicon with FinFlow logo mark in `app/icon.svg` (GitHub Issue #1).                                           | `fix(ui): update favicon to FinFlow logo`                           |\n"
+        }
+    ]
+}

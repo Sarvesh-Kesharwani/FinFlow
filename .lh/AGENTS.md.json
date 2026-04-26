@@ -1,0 +1,38 @@
+{
+    "sourceFile": "AGENTS.md",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 5,
+            "patches": [
+                {
+                    "date": 1777212053458,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                },
+                {
+                    "date": 1777212092219,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,2 +1,4 @@\n+Follow these instructions on every prompt.\r\n+\r\n 1. After every change, commit the update to the `dev` branch.\r\n-2. Never debug application logic until cache/state issues are ruled out\r\n+3. Never debug application logic until cache/state issues are ruled out\r\n"
+                },
+                {
+                    "date": 1777212119540,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,4 +1,5 @@\n-Follow these instructions on every prompt.\r\n \r\n+# Rules to Follow for Every Task\r\n+\r\n 1. After every change, commit the update to the `dev` branch.\r\n 3. Never debug application logic until cache/state issues are ruled out\r\n"
+                },
+                {
+                    "date": 1777212381838,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -2,4 +2,17 @@\n # Rules to Follow for Every Task\r\n \r\n 1. After every change, commit the update to the `dev` branch.\r\n 3. Never debug application logic until cache/state issues are ruled out\r\n+    - Always start development using a clean environment:\r\n+    - Kill existing dev server (port 3000)\r\n+    - Remove `.next` directory\r\n+    - Start server\r\n+\r\n+    - On any unexplained error (especially 500 / Internal Server Error):\r\n+    - Perform an automatic clean restart:\r\n+        1. Stop server\r\n+        2. Delete `.next`\r\n+        3. Restart server\r\n+        4. Verify critical routes return 200\r\n+\r\n+    - Treat `.next` cache as non-trustworthy; reset it proactively when instability is detected\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1777212397550,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,9 +1,9 @@\n \r\n # Rules to Follow for Every Task\r\n \r\n 1. After every change, commit the update to the `dev` branch.\r\n-3. Never debug application logic until cache/state issues are ruled out\r\n+2. Never debug application logic until cache/state issues are ruled out\r\n     - Always start development using a clean environment:\r\n     - Kill existing dev server (port 3000)\r\n     - Remove `.next` directory\r\n     - Start server\r\n"
+                },
+                {
+                    "date": 1777213102386,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -14,5 +14,6 @@\n         2. Delete `.next`\r\n         3. Restart server\r\n         4. Verify critical routes return 200\r\n \r\n-    - Treat `.next` cache as non-trustworthy; reset it proactively when instability is detected\n\\ No newline at end of file\n+    - Treat `.next` cache as non-trustworthy; reset it proactively when instability is detected\r\n+3. after each response, tell me the total no of tokens i get every 5hrs, no of tokens used in this task, and remaining tokens. \n\\ No newline at end of file\n"
+                }
+            ],
+            "date": 1777212053458,
+            "name": "Commit-0",
+            "content": "1. After every change, commit the update to the `dev` branch.\r\n2. Never debug application logic until cache/state issues are ruled out\r\n"
+        }
+    ]
+}
