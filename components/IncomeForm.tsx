@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 
-const FINANCE_CHANGED_EVENT = 'finance:changed';
+const FINANCE_CHANGED_EVENT = 'finance-state-changed';
 
 async function setIncome(monthlyIncome: number): Promise<void> {
   const res = await fetch('/api/finance/state', {

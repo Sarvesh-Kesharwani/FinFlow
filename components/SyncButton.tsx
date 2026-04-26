@@ -61,7 +61,7 @@ export function SyncButton() {
           sessionStorage.setItem(PULLED_KEY, '1');
           setLastSynced(data.updatedAt || new Date().toISOString());
           setState('synced');
-          if (data.replacedLocal || data.seededFromLocal) {
+          if (data.replacedLocal) {
             router.refresh();
           }
           return;
