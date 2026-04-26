@@ -8,6 +8,7 @@
     "dev:fresh": "npm run clean && next dev --turbopack",
     "build": "next build",
     "start": "next start",
+    "health:postbuild": "node scripts/post-build-health-check.js",
     "lint": "next lint"
   },
   "dependencies": {

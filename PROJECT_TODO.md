@@ -12,7 +12,7 @@ This file tracks:
 
 ## P0 Core Issues (Highest Priority)
 - [ ] `ISSUE-001` Investigate and harden startup flow for post-build "Internal Server Error" cases.
-- [ ] `ISSUE-002` Add a stable post-build health-check checklist (`/` and key API routes).
+- [x] `ISSUE-002` Add a stable post-build health-check checklist (`/` and key API routes).
 
 ## P1 Core Features
 - [x] `EXP-001` Add optional frequency in Actual Add Expense (daily/weekly/monthly/yearly/custom) with default one-time fallback.
@@ -28,6 +28,7 @@ This file tracks:
 ## Completed Tasks Log
 | Date (IST) | Task ID | Summary | Commit |
 |---|---|---|---|
+| 2026-04-26 | ISSUE-002 | Added `npm run health:postbuild` script with route status checks and documented the checklist for post-build verification. | `chore(health): add post-build route checklist` |
 | 2026-04-26 | EXP-001 | Added optional frequency in Actual Add Expense, kept one-time as default, and preserved old entries compatibility. | `feat(expense): add frequency options and add project todo tracker` |
 | 2026-04-26 | OPS-001 | Created `Sarvesh-Kesharwani/FinFlow`, pushed `dev`, and pushed `prod` history branch. | `chore(project): log FinFlow repo creation and sync` |
 | 2026-04-26 | UI-003 | Replaced old favicon with FinFlow logo mark in `app/icon.svg` (GitHub Issue #1). | `fix(ui): update favicon to FinFlow logo` |

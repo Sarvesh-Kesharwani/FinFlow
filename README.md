@@ -66,3 +66,24 @@ vercel env add YOUTUBE_API_KEY
 vercel env add WHITELIST_CHANNELS
 vercel deploy
 ```
+
+## Post-build health check
+
+After `npm run build`, start the production server and run:
+
+```bash
+npm run health:postbuild
+```
+
+The health check validates:
+- `/` (must be `200`)
+- `/api/auth/session` (must be `200`)
+- `/api/auth/providers` (must be `200`)
+- `/api/finance/state` (must be `200`)
+- `/api/drive/sync` (must be `200` or `401`, depending on sign-in state)
+
+Override base URL when needed (PowerShell):
+
+```bash
+$env:HEALTHCHECK_BASE_URL='http://127.0.0.1:3001'; npm run health:postbuild
+```
