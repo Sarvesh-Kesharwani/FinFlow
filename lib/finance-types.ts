@@ -16,7 +16,7 @@ export type MaintenanceSubcategory =
   | 'fun-mentalHealth'
   | 'physicalHealth';
 
-export type ExpenseCadence = 'one-time' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom';
+export type ExpenseCadence = 'one-time' | 'daily' | 'weekly' | 'bi-weekly' | 'monthly' | 'yearly' | 'custom';
 export type ExpenseBucket = 'predicted' | 'actual';
 
 export interface ExpenseEntry {
@@ -85,6 +85,7 @@ export const MAINTENANCE_SUBCATEGORIES: Array<{ value: MaintenanceSubcategory; l
 export const EXPENSE_CADENCE_OPTIONS: Array<{ value: ExpenseCadence; label: string }> = [
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
+  { value: 'bi-weekly', label: 'Bi-weekly' },
   { value: 'one-time', label: 'One-time' },
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Yearly' },

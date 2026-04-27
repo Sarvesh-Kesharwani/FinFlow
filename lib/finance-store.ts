@@ -50,7 +50,7 @@ function normalizeExpense(entry: Partial<ExpenseEntry>): ExpenseEntry | null {
   const subCategory = String(entry.subCategory ?? '').trim().slice(0, 60) || undefined;
   const rawCadence = String(entry.cadence ?? 'one-time').trim().toLowerCase();
   const cadence = (
-    ['one-time', 'daily', 'weekly', 'monthly', 'yearly', 'custom'].includes(rawCadence)
+    ['one-time', 'daily', 'weekly', 'bi-weekly', 'monthly', 'yearly', 'custom'].includes(rawCadence)
       ? rawCadence
       : 'one-time'
   ) as ExpenseEntry['cadence'];

@@ -20,13 +20,19 @@ function expectedContribution(entry: ExpenseEntry): number {
   const amount = clampMoney(toNumber(entry.amount));
   if (entry.cadence === 'daily') return clampMoney(amount * 30);
   if (entry.cadence === 'weekly') return clampMoney((amount * 52) / 12);
+  if (entry.cadence === 'bi-weekly') return clampMoney((amount * 26) / 12);
   if (entry.cadence === 'monthly') return amount;
   if (entry.cadence === 'yearly') return clampMoney(amount / 12);
   return 0;
 }
 
 function currentMonthContribution(entry: ExpenseEntry): number {
-  if (entry.cadence === 'daily' || entry.cadence === 'weekly' || entry.cadence === 'monthly') {
+  if (
+    entry.cadence === 'daily' ||
+    entry.cadence === 'weekly' ||
+    entry.cadence === 'bi-weekly' ||
+    entry.cadence === 'monthly'
+  ) {
     return clampMoney(toNumber(entry.amount));
   }
   if (entry.cadence === 'yearly') return 0;

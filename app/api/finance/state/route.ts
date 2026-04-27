@@ -60,7 +60,7 @@ function normalizeSubCategory(category: ExpenseCategory, value: unknown): string
 }
 
 function normalizeCadence(value: string): ExpenseCadence {
-  const allowed = new Set<ExpenseCadence>(['one-time', 'daily', 'weekly', 'monthly', 'yearly', 'custom']);
+  const allowed = new Set<ExpenseCadence>(['one-time', 'daily', 'weekly', 'bi-weekly', 'monthly', 'yearly', 'custom']);
   const v = value.trim().toLowerCase() as ExpenseCadence;
   return allowed.has(v) ? v : 'one-time';
 }
