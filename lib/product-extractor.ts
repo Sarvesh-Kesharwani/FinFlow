@@ -33,7 +33,7 @@ function getMetas(html: string): Array<Record<string, string>> {
 }
 
 function getMetaValue(metas: Array<Record<string, string>>, keys: string[]): string {
-  const wanted = new Set(keys.map((k) => k.toLowerCase()));
+  const wanted = new Set(keys.map((key) => key.toLowerCase()));
   for (const meta of metas) {
     const key = (meta.property ?? meta.name ?? meta.itemprop ?? '').toLowerCase();
     if (!key || !wanted.has(key)) continue;
@@ -61,13 +61,29 @@ function platformFromHost(hostname: string): string {
   return host.split('.')[0] || 'Online Store';
 }
 
+function extractMatch(html: string, pattern: RegExp): string {
+  const match = html.match(pattern);
+  return match?.[1] ? cleanText(match[1]) : '';
+}
+
 function titleFromUrl(url: URL): string {
-  const segment = url.pathname
+  const segments = url.pathname
     .split('/')
     .filter(Boolean)
-    .pop();
+    .map((segment) => decodeURIComponent(segment));
+
+  const amazonDpIndex = segments.findIndex((segment) => segment.toLowerCase() === 'dp');
+  if (amazonDpIndex > 0) {
+    const productSlug = segments[amazonDpIndex - 1]
+      .replace(/[-_]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (productSlug) return cleanText(productSlug);
+  }
+
+  const segment = segments.at(-1);
   if (!segment) return 'Product';
-  const clean = decodeURIComponent(segment).replace(/[-_]+/g, ' ').replace(/\.[a-z0-9]+$/i, '').trim();
+  const clean = segment.replace(/[-_]+/g, ' ').replace(/\.[a-z0-9]+$/i, '').trim();
   return clean ? cleanText(clean) : 'Product';
 }
 
@@ -76,15 +92,14 @@ function extractJsonLd(html: string): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
 
   for (const script of scripts) {
-    const jsonText = script
-      .replace(/<script[^>]*>/i, '')
-      .replace(/<\/script>/i, '')
-      .trim();
+    const jsonText = script.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '').trim();
     if (!jsonText) continue;
     try {
       const parsed = JSON.parse(jsonText) as unknown;
       if (Array.isArray(parsed)) {
-        for (const item of parsed) if (item && typeof item === 'object') out.push(item as Record<string, unknown>);
+        for (const item of parsed) {
+          if (item && typeof item === 'object') out.push(item as Record<string, unknown>);
+        }
       } else if (parsed && typeof parsed === 'object') {
         out.push(parsed as Record<string, unknown>);
       }
@@ -100,22 +115,22 @@ function findProductNode(nodes: Array<Record<string, unknown>>): Record<string, 
   const stack = [...nodes];
   while (stack.length > 0) {
     const current = stack.pop()!;
-    const t = current['@type'];
-    if (typeof t === 'string' && t.toLowerCase() === 'product') return current;
-    if (Array.isArray(t) && t.some((v) => String(v).toLowerCase() === 'product')) return current;
+    const typeValue = current['@type'];
+    if (typeof typeValue === 'string' && typeValue.toLowerCase() === 'product') return current;
+    if (Array.isArray(typeValue) && typeValue.some((value) => String(value).toLowerCase() === 'product')) return current;
 
     for (const value of Object.values(current)) {
-      if (value && typeof value === 'object') {
-        if (Array.isArray(value)) {
-          for (const item of value) {
-            if (item && typeof item === 'object') stack.push(item as Record<string, unknown>);
-          }
-        } else {
-          stack.push(value as Record<string, unknown>);
+      if (!value || typeof value !== 'object') continue;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item && typeof item === 'object') stack.push(item as Record<string, unknown>);
         }
+      } else {
+        stack.push(value as Record<string, unknown>);
       }
     }
   }
+
   return null;
 }
 
@@ -145,11 +160,17 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
       const ogTitle = getMetaValue(metas, ['og:title', 'twitter:title']);
       if (ogTitle) title = cleanText(ogTitle);
 
-      const directPrice =
-        getMetaValue(metas, ['product:price:amount', 'og:price:amount', 'twitter:data1', 'price']) ||
-        '';
-      const directCurrency =
-        getMetaValue(metas, ['product:price:currency', 'og:price:currency', 'currency']) || '';
+      if (!ogTitle) {
+        const domTitle =
+          extractMatch(html, /id=["']productTitle["'][^>]*>\s*([\s\S]*?)\s*<\/span>/i) ||
+          extractMatch(html, /<title>([^<]+)<\/title>/i);
+        if (domTitle) {
+          title = domTitle.replace(/\s*:\s*Amazon\.[^|<]+$/i, '').trim();
+        }
+      }
+
+      const directPrice = getMetaValue(metas, ['product:price:amount', 'og:price:amount', 'twitter:data1', 'price']);
+      const directCurrency = getMetaValue(metas, ['product:price:currency', 'og:price:currency', 'currency']);
 
       if (directPrice) price = parsePrice(directPrice);
       if (directCurrency) currency = directCurrency.toUpperCase();
@@ -176,11 +197,25 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
       }
 
       if (price <= 0) {
-        const pageText = html.slice(0, 200000);
-        const rupeeMatch = pageText.match(/(?:₹|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
-        if (rupeeMatch?.[1]) {
-          price = parsePrice(rupeeMatch[1]);
+        const structuredPrice =
+          extractMatch(html, /"priceAmount"\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/i) ||
+          extractMatch(html, /class=["'][^"']*a-price-whole[^"']*["'][^>]*>\s*([^<]+)/i) ||
+          extractMatch(html, /class=["'][^"']*a-offscreen[^"']*["'][^>]*>\s*\u20B9\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
+        if (structuredPrice) {
+          price = parsePrice(structuredPrice);
           currency = 'INR';
+        }
+      }
+
+      if (price <= 0) {
+        const pageText = html.slice(0, 200000);
+        const rupeeMatch = pageText.match(/(?:\u20B9|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+        if (rupeeMatch?.[1]) {
+          const parsed = parsePrice(rupeeMatch[1]);
+          if (parsed >= 10) {
+            price = parsed;
+            currency = 'INR';
+          }
         }
       }
     }
