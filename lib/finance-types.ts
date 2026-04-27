@@ -1,15 +1,4 @@
-export type ExpenseCategory =
-  | 'purchases'
-  | 'services'
-  | 'investments'
-  | 'subscriptions'
-  | 'utilities'
-  | 'fuel'
-  | 'insurance'
-  | 'maintenance'
-  | 'savings'
-  | 'money+'
-  | 'other';
+export type ExpenseCategory = 'maintenance' | 'savings' | 'money+';
 
 export type MaintenanceSubcategory =
   | 'productivity-now'
@@ -63,17 +52,9 @@ export const DEFAULT_FINANCE_STORE: FinanceStore = {
 };
 
 export const EXPENSE_CATEGORIES: Array<{ value: ExpenseCategory; label: string }> = [
-  { value: 'purchases', label: 'Purchases' },
-  { value: 'services', label: 'Services' },
-  { value: 'investments', label: 'Investments' },
-  { value: 'subscriptions', label: 'Subscriptions' },
-  { value: 'utilities', label: 'Utilities' },
-  { value: 'fuel', label: 'Fuel' },
-  { value: 'insurance', label: 'Insurance' },
   { value: 'maintenance', label: 'Maintenance' },
   { value: 'savings', label: 'Savings' },
   { value: 'money+', label: 'Money+' },
-  { value: 'other', label: 'Other' },
 ];
 
 export const MAINTENANCE_SUBCATEGORIES: Array<{ value: MaintenanceSubcategory; label: string }> = [

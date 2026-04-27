@@ -19,19 +19,8 @@ function parseAmount(raw: string): number {
   return parseFloat(raw.replace(/,/g, '').trim()) || 0;
 }
 
-function mapCategory(csvCategory: string, place: string): ExpenseCategory {
-  const p = place.toUpperCase();
-  if (p.includes('CHATGPT') || p.includes('CLAUDE') || p.includes('JIO') || p.includes('GOOGLEPLA')) return 'subscriptions';
-  switch (csvCategory.trim().toUpperCase()) {
-    case 'SHOPPING': return 'purchases';
-    case 'GROCERIES': return 'purchases';
-    case 'UTILITIES': return 'utilities';
-    case 'BILLS': return 'utilities';
-    case 'FUEL': return 'fuel';
-    case 'INSURANCE': return 'insurance';
-    case 'MAINTENANCE': return 'maintenance';
-    default: return 'other';
-  }
+function mapCategory(_csvCategory: string, _place: string): ExpenseCategory {
+  return 'maintenance';
 }
 
 export async function GET() {

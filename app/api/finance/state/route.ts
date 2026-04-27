@@ -36,21 +36,9 @@ function moveItem<T>(items: T[], from: number, to: number): T[] {
 }
 
 function normalizeExpenseCategory(value: string): ExpenseCategory {
-  const allowed = new Set<ExpenseCategory>([
-    'purchases',
-    'services',
-    'investments',
-    'subscriptions',
-    'utilities',
-    'fuel',
-    'insurance',
-    'maintenance',
-    'savings',
-    'money+',
-    'other',
-  ]);
+  const allowed = new Set<ExpenseCategory>(['maintenance', 'savings', 'money+']);
   const v = value.trim().toLowerCase() as ExpenseCategory;
-  return allowed.has(v) ? v : 'other';
+  return allowed.has(v) ? v : 'maintenance';
 }
 
 function normalizeSubCategory(category: ExpenseCategory, value: unknown): string | undefined {

@@ -37,7 +37,7 @@ function createExpenseForm(): ExpenseFormState {
     mode: 'one-time',
     frequency: '',
     customFrequency: '',
-    category: 'other',
+    category: 'maintenance',
     subCategory: '',
   };
 }
