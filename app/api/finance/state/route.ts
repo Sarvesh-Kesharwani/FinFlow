@@ -1,8 +1,12 @@
 import {
   getCookieFinanceStore,
   markCookieStoreDirty,
+  markCookieStoreSynced,
+  markDriveSyncHydrated,
   setCookieFinanceStore,
 } from '@/lib/finance-store';
+import { writeDriveFinanceStore } from '@/lib/finance-drive';
+import { getSession } from '@/lib/session';
 import { normalizeMoney } from '@/lib/finance-math';
 import type { BuyListItem, ExpenseBucket, ExpenseCadence, ExpenseCategory, ExpenseEntry, FinanceStore } from '@/lib/finance-types';
 import { extractProductDetails } from '@/lib/product-extractor';
@@ -164,7 +168,26 @@ export async function POST(req: Request) {
         notes: String(r.notes ?? '').trim() || undefined,
       });
     }
-    return persist({ ...state, expenses: [...fresh, ...state.expenses] });
+
+    const next = { ...state, expenses: [...fresh, ...state.expenses] };
+    await setCookieFinanceStore(next);
+
+    // Push to Drive synchronously so the import survives logout/login.
+    // Falls back to dirty-marking if Drive is unavailable.
+    const session = await getSession();
+    if (session?.accessToken) {
+      try {
+        const syncedAt = await writeDriveFinanceStore(session.accessToken, next);
+        await markCookieStoreSynced(syncedAt);
+        await markDriveSyncHydrated();
+      } catch {
+        await markCookieStoreDirty();
+      }
+    } else {
+      await markCookieStoreDirty();
+    }
+
+    return Response.json({ ok: true, state: next });
   }
 
   if (op === 'add_buy_item') {
