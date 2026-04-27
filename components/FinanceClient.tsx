@@ -44,13 +44,25 @@ function createExpenseForm(): ExpenseFormState {
 
 type FilterPeriod = 'all' | 'day' | 'week' | 'month' | 'year';
 
-type FilterState = {
+type ActualFilter = {
+  kind: 'actual';
   period: FilterPeriod;
   reference: string; // YYYY-MM-DD
 };
 
-function createFilter(): FilterState {
-  return { period: 'all', reference: new Date().toISOString().slice(0, 10) };
+type PredictedFilter = {
+  kind: 'predicted';
+  cadence: ExpenseCadence | 'all';
+};
+
+type FilterState = ActualFilter | PredictedFilter;
+
+function createActualFilter(): ActualFilter {
+  return { kind: 'actual', period: 'all', reference: new Date().toISOString().slice(0, 10) };
+}
+
+function createPredictedFilter(): PredictedFilter {
+  return { kind: 'predicted', cadence: 'all' };
 }
 
 function startOfWeek(date: Date): Date {
@@ -62,11 +74,16 @@ function startOfWeek(date: Date): Date {
   return out;
 }
 
-function matchesFilter(spentOn: string, filter: FilterState): boolean {
+function matchesFilter(entry: ExpenseEntry, filter: FilterState): boolean {
+  if (filter.kind === 'predicted') {
+    if (filter.cadence === 'all') return true;
+    return entry.cadence === filter.cadence;
+  }
+
   if (filter.period === 'all') return true;
   const ref = new Date(filter.reference);
   if (Number.isNaN(ref.getTime())) return true;
-  const at = new Date(spentOn);
+  const at = new Date(entry.spentOn);
   if (Number.isNaN(at.getTime())) return false;
 
   if (filter.period === 'day') {
@@ -249,7 +266,7 @@ function ExpenseGroupedList({
   onRemove: (id: string) => void;
 }) {
   const filtered = useMemo(
-    () => expenses.filter((e) => matchesFilter(e.spentOn, filter)),
+    () => expenses.filter((e) => matchesFilter(e, filter)),
     [expenses, filter],
   );
 
@@ -490,24 +507,51 @@ function ExpenseEditor({
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Filter</span>
-        <select
-          className="text-input"
-          value={filter.period}
-          onChange={(e) => setFilter((s) => ({ ...s, period: e.target.value as FilterPeriod }))}
-        >
-          <option value="all">All time</option>
-          <option value="day">Day</option>
-          <option value="week">Week</option>
-          <option value="month">Month</option>
-          <option value="year">Year</option>
-        </select>
-        {filter.period !== 'all' && (
-          <input
-            type="date"
+        {filter.kind === 'predicted' ? (
+          <select
             className="text-input"
-            value={filter.reference}
-            onChange={(e) => setFilter((s) => ({ ...s, reference: e.target.value }))}
-          />
+            value={filter.cadence}
+            onChange={(e) =>
+              setFilter({ kind: 'predicted', cadence: e.target.value as ExpenseCadence | 'all' })
+            }
+          >
+            <option value="all">All frequencies</option>
+            {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <>
+            <select
+              className="text-input"
+              value={filter.period}
+              onChange={(e) =>
+                setFilter({
+                  kind: 'actual',
+                  period: e.target.value as FilterPeriod,
+                  reference: filter.reference,
+                })
+              }
+            >
+              <option value="all">All time</option>
+              <option value="day">Day</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+              <option value="year">Year</option>
+            </select>
+            {filter.period !== 'all' && (
+              <input
+                type="date"
+                className="text-input"
+                value={filter.reference}
+                onChange={(e) =>
+                  setFilter({ kind: 'actual', period: filter.period, reference: e.target.value })
+                }
+              />
+            )}
+          </>
         )}
       </div>
 
@@ -536,8 +580,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
 
   const [predictedForm, setPredictedForm] = useState(createExpenseForm);
   const [actualForm, setActualForm] = useState(createExpenseForm);
-  const [predictedFilter, setPredictedFilter] = useState<FilterState>(createFilter);
-  const [actualFilter, setActualFilter] = useState<FilterState>(createFilter);
+  const [predictedFilter, setPredictedFilter] = useState<FilterState>(createPredictedFilter);
+  const [actualFilter, setActualFilter] = useState<FilterState>(createActualFilter);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const predictedExpenses = useMemo(
