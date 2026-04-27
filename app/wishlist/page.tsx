@@ -1,6 +1,6 @@
 import { FinanceClient } from '@/components/FinanceClient';
 import { EmptyState } from '@/components/EmptyState';
-import { getCookieFinanceStore } from '@/lib/finance-store';
+import { loadFinanceState } from '@/lib/finance-load';
 import { getSession } from '@/lib/session';
 
 export default async function WishlistPage() {
@@ -15,7 +15,7 @@ export default async function WishlistPage() {
     );
   }
 
-  const state = await getCookieFinanceStore();
+  const state = await loadFinanceState();
   return (
     <div className="space-y-4">
       <section className="space-y-1">

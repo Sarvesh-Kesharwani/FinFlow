@@ -1,6 +1,6 @@
 import { EmptyState } from '@/components/EmptyState';
 import { summarizeFinance } from '@/lib/finance-math';
-import { getCookieFinanceStore } from '@/lib/finance-store';
+import { loadFinanceState } from '@/lib/finance-load';
 import { getSession } from '@/lib/session';
 
 function inr(amount: number): string {
@@ -23,7 +23,7 @@ export default async function ReportsPage() {
     );
   }
 
-  const state = await getCookieFinanceStore();
+  const state = await loadFinanceState();
   const summary = summarizeFinance(state);
 
   const byCategory = state.expenses.reduce<Record<string, number>>((acc, expense) => {

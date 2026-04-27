@@ -1,7 +1,7 @@
 import { FinanceClient } from '@/components/FinanceClient';
 import { EmptyState } from '@/components/EmptyState';
 import { getSession } from '@/lib/session';
-import { getCookieFinanceStore } from '@/lib/finance-store';
+import { loadFinanceState } from '@/lib/finance-load';
 
 export default async function DashboardPage() {
   const session = await getSession();
@@ -15,7 +15,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const state = await getCookieFinanceStore();
+  const state = await loadFinanceState();
   return (
     <div className="space-y-4">
       <FinanceClient initialState={state} mode="dashboard" />
