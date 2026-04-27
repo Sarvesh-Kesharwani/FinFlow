@@ -1,6 +1,6 @@
 'use client';
 
-import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState } from 'react';
+import { type Dispatch, type PointerEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { ItemAvatar } from '@/components/ItemAvatar';
 import { CsvImportButton } from '@/components/CsvImportButton';
 import { summarizeFinance } from '@/lib/finance-math';
@@ -51,6 +51,20 @@ type ClearDialogState = {
   challenge: string;
   label: string;
 } | null;
+
+type ExpenseDragState = {
+  item: ExpenseEntry;
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+};
+
+type ExpenseDragStart = Omit<ExpenseDragState, 'item'> & {
+  item: ExpenseEntry;
+};
 
 type FinanceOp =
   | {
@@ -166,6 +180,10 @@ function matchesFilter(entry: ExpenseEntry, filter: FilterState): boolean {
 
 function categoryLabel(value: ExpenseCategory): string {
   return EXPENSE_CATEGORIES.find((category) => category.value === value)?.label ?? value;
+}
+
+function isExpenseCategory(value: string | null): value is ExpenseCategory {
+  return EXPENSE_CATEGORIES.some((category) => category.value === value);
 }
 
 function subCategoryLabel(value: string): string {
@@ -297,31 +315,38 @@ function ExpenseRow({
   onEdit,
   showFrequency,
   isDragging,
-  onDragStart,
-  onDragEnd,
+  onPointerDragStart,
 }: {
   item: ExpenseEntry;
   onRemove: (id: string) => void;
   onEdit: (item: ExpenseEntry) => void;
   showFrequency: boolean;
   isDragging: boolean;
-  onDragStart: (item: ExpenseEntry) => void;
-  onDragEnd: () => void;
+  onPointerDragStart: (drag: ExpenseDragStart) => void;
 }) {
   const frequencyLabel = getFrequencyLabel(item);
   const visibleNotes = getVisibleExpenseNotes(item);
 
+  function startPointerDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+    const card = event.currentTarget.closest('li');
+    const rect = card?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onPointerDragStart({
+      item,
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+
   return (
-    <li
-      className={`lift-card flex-col items-start sm:flex-row ${isDragging ? 'expense-card-dragging' : ''}`}
-      draggable
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', item.id);
-        onDragStart(item);
-      }}
-      onDragEnd={onDragEnd}
-    >
+    <li className={`lift-card flex-col items-start sm:flex-row ${isDragging ? 'expense-card-dragging' : ''}`}>
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <ItemAvatar title={item.title} imageUrl={item.imageUrl} />
         <div className="min-w-0 flex-1">
@@ -339,6 +364,9 @@ function ExpenseRow({
       </div>
       <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
         <p className="font-extrabold text-duored-deep">{formatMoney(item.amount)}</p>
+        <button className="chip-soft expense-drag-handle" onPointerDown={startPointerDrag} type="button" aria-label={`Move ${item.title}`}>
+          Move
+        </button>
         <button className="chip-soft" onClick={() => onEdit(item)} type="button">
           Edit
         </button>
@@ -410,8 +438,7 @@ function ExpenseListItem({
   onSaveEdit,
   onRemove,
   draggedExpenseId,
-  onDragStart,
-  onDragEnd,
+  onPointerDragStart,
 }: {
   item: ExpenseEntry;
   showFrequency: boolean;
@@ -423,8 +450,7 @@ function ExpenseListItem({
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
   draggedExpenseId: string | null;
-  onDragStart: (item: ExpenseEntry) => void;
-  onDragEnd: () => void;
+  onPointerDragStart: (drag: ExpenseDragStart) => void;
 }) {
   if (isEditing && editForm) {
     return (
@@ -543,8 +569,7 @@ function ExpenseListItem({
       onRemove={onRemove}
       showFrequency={showFrequency}
       isDragging={draggedExpenseId === item.id}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onPointerDragStart={onPointerDragStart}
     />
   );
 }
@@ -560,8 +585,7 @@ function MaintenanceSubGroups({
   onSaveEdit,
   onRemove,
   draggedExpenseId,
-  onDragStart,
-  onDragEnd,
+  onPointerDragStart,
 }: {
   items: ExpenseEntry[];
   showFrequency: boolean;
@@ -573,8 +597,7 @@ function MaintenanceSubGroups({
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
   draggedExpenseId: string | null;
-  onDragStart: (item: ExpenseEntry) => void;
-  onDragEnd: () => void;
+  onPointerDragStart: (drag: ExpenseDragStart) => void;
 }) {
   const buckets = useMemo(() => {
     const map = new Map<string, ExpenseEntry[]>();
@@ -616,8 +639,7 @@ function MaintenanceSubGroups({
                 onSaveEdit={onSaveEdit}
                 onRemove={onRemove}
                 draggedExpenseId={draggedExpenseId}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
+                onPointerDragStart={onPointerDragStart}
               />
             ))}
           </ul>
@@ -640,10 +662,7 @@ function ExpenseGroupedList({
   onRemove,
   draggedExpenseId,
   dragOverCategory,
-  onDragStart,
-  onDragEnd,
-  onDragEnterCategory,
-  onDropCategory,
+  onPointerDragStart,
 }: {
   expenses: ExpenseEntry[];
   filter: FilterState;
@@ -657,10 +676,7 @@ function ExpenseGroupedList({
   onRemove: (id: string) => void;
   draggedExpenseId: string | null;
   dragOverCategory: ExpenseCategory | null;
-  onDragStart: (item: ExpenseEntry) => void;
-  onDragEnd: () => void;
-  onDragEnterCategory: (category: ExpenseCategory) => void;
-  onDropCategory: (category: ExpenseCategory) => void;
+  onPointerDragStart: (drag: ExpenseDragStart) => void;
 }) {
   const filtered = useMemo(() => expenses.filter((entry) => matchesFilter(entry, filter)), [expenses, filter]);
   const grouped = useMemo(() => {
@@ -688,23 +704,11 @@ function ExpenseGroupedList({
     return (
       <div
         key={category}
+        data-expense-category={category}
         className={[
           'space-y-2 rounded-2xl border bg-white/60 p-3 transition-colors',
           isDropActive ? 'border-duored-main bg-duored-soft/40' : 'border-duored-soft/70',
         ].join(' ')}
-        onDragOver={(event) => {
-          if (!draggedExpenseId) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
-        }}
-        onDragEnter={() => {
-          if (draggedExpenseId) onDragEnterCategory(category);
-        }}
-        onDrop={(event) => {
-          if (!draggedExpenseId) return;
-          event.preventDefault();
-          onDropCategory(category);
-        }}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -739,8 +743,7 @@ function ExpenseGroupedList({
             onSaveEdit={onSaveEdit}
             onRemove={onRemove}
             draggedExpenseId={draggedExpenseId}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
+            onPointerDragStart={onPointerDragStart}
           />
         ) : (
           <ul className="space-y-2">
@@ -757,8 +760,7 @@ function ExpenseGroupedList({
                 onSaveEdit={onSaveEdit}
                 onRemove={onRemove}
                 draggedExpenseId={draggedExpenseId}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
+                onPointerDragStart={onPointerDragStart}
               />
             ))}
           </ul>
@@ -797,10 +799,7 @@ function ExpenseEditor({
   headerAction,
   draggedExpenseId,
   dragOverCategory,
-  onDragStart,
-  onDragEnd,
-  onDragEnterCategory,
-  onDropCategory,
+  onPointerDragStart,
 }: {
   bucket: ExpenseBucket;
   title: string;
@@ -824,10 +823,7 @@ function ExpenseEditor({
   headerAction?: ReactNode;
   draggedExpenseId: string | null;
   dragOverCategory: ExpenseCategory | null;
-  onDragStart: (item: ExpenseEntry) => void;
-  onDragEnd: () => void;
-  onDragEnterCategory: (category: ExpenseCategory) => void;
-  onDropCategory: (category: ExpenseCategory) => void;
+  onPointerDragStart: (drag: ExpenseDragStart) => void;
 }) {
   const supportsFrequency = bucket === 'predicted';
 
@@ -997,10 +993,7 @@ function ExpenseEditor({
         onRemove={onRemoveExpense}
         draggedExpenseId={draggedExpenseId}
         dragOverCategory={dragOverCategory}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onDragEnterCategory={onDragEnterCategory}
-        onDropCategory={onDropCategory}
+        onPointerDragStart={onPointerDragStart}
       />
 
       <datalist id={`custom-frequency-${bucket}`}>
@@ -1029,7 +1022,12 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [draggedExpenseId, setDraggedExpenseId] = useState<string | null>(null);
   const [dragOverCategory, setDragOverCategory] = useState<ExpenseCategory | null>(null);
-  const [isDraggingExpense, setIsDraggingExpense] = useState(false);
+  const [dragState, setDragState] = useState<ExpenseDragState | null>(null);
+  const dragStateRef = useRef<ExpenseDragState | null>(null);
+  const dragOverlayRef = useRef<HTMLDivElement | null>(null);
+  const dragOverCategoryRef = useRef<ExpenseCategory | null>(null);
+  const nextDragPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
   const [clearDialog, setClearDialog] = useState<ClearDialogState>(null);
   const [clearInput, setClearInput] = useState('');
 
@@ -1045,6 +1043,90 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     }
     return Array.from(values);
   }, [state.expenses]);
+
+  function paintDragOverlay(x: number, y: number) {
+    const current = dragStateRef.current;
+    const overlay = dragOverlayRef.current;
+    if (!current || !overlay) return;
+    overlay.style.transform = `translate3d(${x - current.offsetX}px, ${y - current.offsetY}px, 0)`;
+  }
+
+  function categoryFromPoint(x: number, y: number): ExpenseCategory | null {
+    const target = document.elementFromPoint(x, y);
+    const categoryNode = target?.closest<HTMLElement>('[data-expense-category]');
+    const category = categoryNode?.dataset.expenseCategory ?? null;
+    return isExpenseCategory(category) ? category : null;
+  }
+
+  useEffect(() => {
+    if (!dragState) return;
+
+    dragStateRef.current = dragState;
+    dragOverCategoryRef.current = dragOverCategory;
+    document.body.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+    paintDragOverlay(dragState.x, dragState.y);
+
+    function schedulePaint() {
+      if (dragFrameRef.current !== null) return;
+      dragFrameRef.current = window.requestAnimationFrame(() => {
+        dragFrameRef.current = null;
+        const nextPosition = nextDragPositionRef.current;
+        if (!nextPosition) return;
+        paintDragOverlay(nextPosition.x, nextPosition.y);
+      });
+    }
+
+    function onPointerMove(event: globalThis.PointerEvent) {
+      const current = dragStateRef.current;
+      if (!current) return;
+      nextDragPositionRef.current = { x: event.clientX, y: event.clientY };
+      schedulePaint();
+
+      const nextCategory = categoryFromPoint(event.clientX, event.clientY);
+      if (nextCategory !== dragOverCategoryRef.current) {
+        dragOverCategoryRef.current = nextCategory;
+        setDragOverCategory(nextCategory);
+      }
+    }
+
+    function finishDrag(event: globalThis.PointerEvent) {
+      const current = dragStateRef.current;
+      if (!current) return;
+
+      const finalCategory = categoryFromPoint(event.clientX, event.clientY) ?? dragOverCategoryRef.current;
+      if (finalCategory && finalCategory !== current.item.category) {
+        moveExpense(current.item.id, finalCategory);
+      }
+
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+      }
+      nextDragPositionRef.current = null;
+      dragStateRef.current = null;
+      dragOverCategoryRef.current = null;
+      setDraggedExpenseId(null);
+      setDragOverCategory(null);
+      setDragState(null);
+    }
+
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+      }
+    };
+  }, [dragOverCategory, dragState]);
 
   function runMutation(payload: FinanceOp, optimistic?: (current: FinanceStore) => FinanceStore) {
     setError('');
@@ -1186,15 +1268,38 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     );
   }
 
-  function handleDropCategory(category: ExpenseCategory) {
-    if (!draggedExpenseId) return;
-    moveExpense(draggedExpenseId, category);
-    setDraggedExpenseId(null);
-    setDragOverCategory(null);
+  function startExpenseDrag(drag: ExpenseDragStart) {
+    setEditingExpenseId(null);
+    setEditingExpenseForm(null);
+    setDraggedExpenseId(drag.item.id);
+    setDragOverCategory(drag.item.category);
+    dragOverCategoryRef.current = drag.item.category;
+    dragStateRef.current = drag;
+    setDragState(drag);
   }
 
   return (
-    <div className={`space-y-6 ${isDraggingExpense ? 'expense-board-dragging' : ''}`}>
+    <div className={`space-y-6 ${dragState ? 'expense-board-dragging' : ''}`}>
+      {dragState && (
+        <div
+          ref={dragOverlayRef}
+          className="expense-drag-overlay flex items-center justify-between gap-3"
+          style={{
+            width: dragState.width,
+            minHeight: dragState.height,
+            transform: `translate3d(${dragState.x - dragState.offsetX}px, ${dragState.y - dragState.offsetY}px, 0)`,
+          }}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <ItemAvatar title={dragState.item.title} imageUrl={dragState.item.imageUrl} />
+            <div className="min-w-0">
+              <p className="truncate font-extrabold text-duored-ink">{formatExpenseTitle(dragState.item.title)}</p>
+              <p className="text-xs font-bold text-duored-muted">{categoryLabel(dragState.item.category)}</p>
+            </div>
+          </div>
+          <p className="shrink-0 font-extrabold text-duored-deep">{formatMoney(dragState.item.amount)}</p>
+        </div>
+      )}
       {clearDialog && (
         <ClearExpenseDialog
           dialog={clearDialog}
@@ -1241,17 +1346,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             setFilter={setPredictedFilter}
             draggedExpenseId={draggedExpenseId}
             dragOverCategory={dragOverCategory}
-            onDragStart={(item) => {
-              setDraggedExpenseId(item.id);
-              setIsDraggingExpense(true);
-            }}
-            onDragEnd={() => {
-              setDraggedExpenseId(null);
-              setDragOverCategory(null);
-              setIsDraggingExpense(false);
-            }}
-            onDragEnterCategory={setDragOverCategory}
-            onDropCategory={handleDropCategory}
+            onPointerDragStart={startExpenseDrag}
           />
           <ExpenseEditor
             bucket="actual"
@@ -1290,17 +1385,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             }
             draggedExpenseId={draggedExpenseId}
             dragOverCategory={dragOverCategory}
-            onDragStart={(item) => {
-              setDraggedExpenseId(item.id);
-              setIsDraggingExpense(true);
-            }}
-            onDragEnd={() => {
-              setDraggedExpenseId(null);
-              setDragOverCategory(null);
-              setIsDraggingExpense(false);
-            }}
-            onDragEnterCategory={setDragOverCategory}
-            onDropCategory={handleDropCategory}
+            onPointerDragStart={startExpenseDrag}
           />
         </>
       )}

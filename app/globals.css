@@ -87,11 +87,21 @@
   }
 
   .expense-card-dragging {
-    @apply scale-[1.02] shadow-[0_16px_36px_rgba(216,54,72,0.24)] rotate-[1deg];
-    opacity: 0.92;
+    @apply scale-[0.98];
+    opacity: 0.38;
   }
 
   .expense-board-dragging .lift-card {
-    @apply transition-all duration-150 ease-out;
+    @apply transition-colors duration-150 ease-out;
+  }
+
+  .expense-drag-handle {
+    @apply cursor-grab active:cursor-grabbing;
+    touch-action: none;
+  }
+
+  .expense-drag-overlay {
+    @apply pointer-events-none fixed left-0 top-0 z-50 rounded-2xl border-2 border-duored-main bg-white px-4 py-3 shadow-[0_20px_48px_rgba(216,54,72,0.28)];
+    will-change: transform;
   }
 }
