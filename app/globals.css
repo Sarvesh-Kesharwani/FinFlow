@@ -71,7 +71,7 @@
   }
 
   .lift-card {
-    @apply flex items-center justify-between gap-3 rounded-2xl border-2 border-duored-border bg-white px-4 py-3 shadow-[0_3px_0_0_#f5d6da];
+    @apply flex items-center justify-between gap-3 rounded-2xl border-2 border-duored-border bg-white px-4 py-3 shadow-[0_3px_0_0_#f5d6da] transition-transform transition-shadow duration-150 ease-out;
   }
 
   .section-title {
@@ -84,5 +84,14 @@
 
   .card {
     @apply overflow-hidden rounded-chonk border-2 border-duored-border bg-white shadow-roseCard;
+  }
+
+  .expense-card-dragging {
+    @apply scale-[1.02] shadow-[0_16px_36px_rgba(216,54,72,0.24)] rotate-[1deg];
+    opacity: 0.92;
+  }
+
+  .expense-board-dragging .lift-card {
+    @apply transition-all duration-150 ease-out;
   }
 }

@@ -1,11 +1,9 @@
 import {
   getCookieFinanceStore,
   markCookieStoreDirty,
-  markCookieStoreSynced,
-  markDriveSyncHydrated,
   setCookieFinanceStore,
 } from '@/lib/finance-store';
-import { readDriveFinanceStore, writeDriveFinanceStore } from '@/lib/finance-drive';
+import { readDriveFinanceStore } from '@/lib/finance-drive';
 import { getSession } from '@/lib/session';
 import { normalizeMoney } from '@/lib/finance-math';
 import type {
@@ -83,54 +81,45 @@ function sanitizeImageUrl(value: unknown): string | undefined {
   return out || undefined;
 }
 
-async function loadAuthoritativeState(): Promise<{ state: FinanceStore; accessToken: string | null }> {
+async function loadAuthoritativeState(): Promise<FinanceStore> {
   const cookieStore = await getCookieFinanceStore();
   const session = await getSession();
   const accessToken = session?.accessToken ?? null;
-  if (!accessToken) return { state: cookieStore, accessToken: null };
+  if (!accessToken) return cookieStore;
 
   try {
     const drive = await readDriveFinanceStore(accessToken);
     if (drive) {
       return {
-        state: {
-          monthlyIncome: drive.monthlyIncome,
-          expenses: drive.expenses,
-          buyList: drive.buyList,
-          requests: drive.requests,
-        },
-        accessToken,
+        monthlyIncome: drive.monthlyIncome,
+        expenses: drive.expenses,
+        buyList: drive.buyList,
+        requests: drive.requests,
       };
     }
   } catch {
     // fall through to cookie copy
   }
-  return { state: cookieStore, accessToken };
+  return cookieStore;
 }
 
-async function persist(next: FinanceStore, accessToken: string | null) {
+async function loadMutationState(): Promise<FinanceStore> {
+  return getCookieFinanceStore();
+}
+
+async function persist(next: FinanceStore) {
   await setCookieFinanceStore(next);
-  if (accessToken) {
-    try {
-      const syncedAt = await writeDriveFinanceStore(accessToken, next);
-      await markCookieStoreSynced(syncedAt);
-      await markDriveSyncHydrated();
-      return Response.json({ ok: true, state: next });
-    } catch {
-      // fall through to dirty-mark
-    }
-  }
   await markCookieStoreDirty();
   return Response.json({ ok: true, state: next });
 }
 
 export async function GET() {
-  const { state } = await loadAuthoritativeState();
+  const state = await loadAuthoritativeState();
   return Response.json({ ok: true, state });
 }
 
 export async function POST(req: Request) {
-  const { state, accessToken } = await loadAuthoritativeState();
+  const state = await loadMutationState();
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;
@@ -146,7 +135,6 @@ export async function POST(req: Request) {
         ...state,
         monthlyIncome: normalizeMoney(body.monthlyIncome),
       },
-      accessToken,
     );
   }
 
@@ -170,7 +158,7 @@ export async function POST(req: Request) {
       imageUrl: sanitizeImageUrl(body.imageUrl),
     };
 
-    return persist({ ...state, expenses: [entry, ...state.expenses] }, accessToken);
+    return persist({ ...state, expenses: [entry, ...state.expenses] });
   }
 
   if (op === 'remove_expense') {
@@ -180,7 +168,6 @@ export async function POST(req: Request) {
         ...state,
         expenses: state.expenses.filter((entry) => entry.id !== expenseId),
       },
-      accessToken,
     );
   }
 
@@ -194,7 +181,6 @@ export async function POST(req: Request) {
         ...state,
         expenses: nextExpenses,
       },
-      accessToken,
     );
   }
 
@@ -218,7 +204,6 @@ export async function POST(req: Request) {
         ...state,
         expenses: state.expenses.map((entry) => (entry.id === expenseId ? updatedEntry : entry)),
       },
-      accessToken,
     );
   }
 
@@ -262,7 +247,6 @@ export async function POST(req: Request) {
         ...state,
         expenses: state.expenses.map((entry) => (entry.id === expenseId ? updatedEntry : entry)),
       },
-      accessToken,
     );
   }
 
@@ -295,7 +279,7 @@ export async function POST(req: Request) {
       });
     }
 
-    return persist({ ...state, expenses: [...fresh, ...state.expenses] }, accessToken);
+    return persist({ ...state, expenses: [...fresh, ...state.expenses] });
   }
 
   if (op === 'add_buy_item') {
@@ -329,7 +313,7 @@ export async function POST(req: Request) {
       createdAt: new Date().toISOString(),
       imageUrl: sanitizeImageUrl(body.imageUrl) ?? extracted.imageUrl,
     };
-    return persist({ ...state, buyList: [...state.buyList, item] }, accessToken);
+    return persist({ ...state, buyList: [...state.buyList, item] });
   }
 
   if (op === 'mark_buy_item_bought') {
@@ -364,7 +348,6 @@ export async function POST(req: Request) {
         expenses: [expense, ...state.expenses],
         buyList: state.buyList.filter((entry) => entry.id !== itemId),
       },
-      accessToken,
     );
   }
 
@@ -375,7 +358,6 @@ export async function POST(req: Request) {
         ...state,
         buyList: state.buyList.filter((entry) => entry.id !== itemId),
       },
-      accessToken,
     );
   }
 
@@ -395,7 +377,6 @@ export async function POST(req: Request) {
         ...state,
         buyList: moveItem(state.buyList, index, target),
       },
-      accessToken,
     );
   }
 
@@ -414,7 +395,6 @@ export async function POST(req: Request) {
         ...state,
         requests: [request, ...state.requests],
       },
-      accessToken,
     );
   }
 
@@ -425,7 +405,6 @@ export async function POST(req: Request) {
         ...state,
         requests: state.requests.filter((entry) => entry.id !== requestId),
       },
-      accessToken,
     );
   }
 

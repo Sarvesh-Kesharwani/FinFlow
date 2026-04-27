@@ -1,6 +1,6 @@
 'use client';
 
-import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState, useTransition } from 'react';
+import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState } from 'react';
 import { ItemAvatar } from '@/components/ItemAvatar';
 import { CsvImportButton } from '@/components/CsvImportButton';
 import { summarizeFinance } from '@/lib/finance-math';
@@ -296,6 +296,7 @@ function ExpenseRow({
   onRemove,
   onEdit,
   showFrequency,
+  isDragging,
   onDragStart,
   onDragEnd,
 }: {
@@ -303,6 +304,7 @@ function ExpenseRow({
   onRemove: (id: string) => void;
   onEdit: (item: ExpenseEntry) => void;
   showFrequency: boolean;
+  isDragging: boolean;
   onDragStart: (item: ExpenseEntry) => void;
   onDragEnd: () => void;
 }) {
@@ -311,7 +313,7 @@ function ExpenseRow({
 
   return (
     <li
-      className="lift-card flex-col items-start sm:flex-row"
+      className={`lift-card flex-col items-start sm:flex-row ${isDragging ? 'expense-card-dragging' : ''}`}
       draggable
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = 'move';
@@ -407,6 +409,7 @@ function ExpenseListItem({
   onCancelEdit,
   onSaveEdit,
   onRemove,
+  draggedExpenseId,
   onDragStart,
   onDragEnd,
 }: {
@@ -419,6 +422,7 @@ function ExpenseListItem({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
+  draggedExpenseId: string | null;
   onDragStart: (item: ExpenseEntry) => void;
   onDragEnd: () => void;
 }) {
@@ -538,6 +542,7 @@ function ExpenseListItem({
       onEdit={onStartEdit}
       onRemove={onRemove}
       showFrequency={showFrequency}
+      isDragging={draggedExpenseId === item.id}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     />
@@ -554,6 +559,7 @@ function MaintenanceSubGroups({
   onCancelEdit,
   onSaveEdit,
   onRemove,
+  draggedExpenseId,
   onDragStart,
   onDragEnd,
 }: {
@@ -566,6 +572,7 @@ function MaintenanceSubGroups({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
+  draggedExpenseId: string | null;
   onDragStart: (item: ExpenseEntry) => void;
   onDragEnd: () => void;
 }) {
@@ -608,6 +615,7 @@ function MaintenanceSubGroups({
                 onCancelEdit={onCancelEdit}
                 onSaveEdit={onSaveEdit}
                 onRemove={onRemove}
+                draggedExpenseId={draggedExpenseId}
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
               />
@@ -730,6 +738,7 @@ function ExpenseGroupedList({
             onCancelEdit={onCancelEdit}
             onSaveEdit={onSaveEdit}
             onRemove={onRemove}
+            draggedExpenseId={draggedExpenseId}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
           />
@@ -747,6 +756,7 @@ function ExpenseGroupedList({
                 onCancelEdit={onCancelEdit}
                 onSaveEdit={onSaveEdit}
                 onRemove={onRemove}
+                draggedExpenseId={draggedExpenseId}
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
               />
@@ -1005,7 +1015,7 @@ function ExpenseEditor({
 export function FinanceClient({ initialState, mode }: { initialState: FinanceStore; mode: 'dashboard' | 'wishlist' }) {
   const [state, setState] = useState(initialState);
   const [error, setError] = useState('');
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
   const summary = useMemo(() => summarizeFinance(state), [state]);
   const affordableSet = useMemo(() => new Set(summary.affordableItemIds), [summary.affordableItemIds]);
 
@@ -1019,6 +1029,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [draggedExpenseId, setDraggedExpenseId] = useState<string | null>(null);
   const [dragOverCategory, setDragOverCategory] = useState<ExpenseCategory | null>(null);
+  const [isDraggingExpense, setIsDraggingExpense] = useState(false);
   const [clearDialog, setClearDialog] = useState<ClearDialogState>(null);
   const [clearInput, setClearInput] = useState('');
 
@@ -1035,13 +1046,20 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     return Array.from(values);
   }, [state.expenses]);
 
-  function runMutation(payload: FinanceOp) {
+  function runMutation(payload: FinanceOp, optimistic?: (current: FinanceStore) => FinanceStore) {
     setError('');
-    startTransition(() => {
-      mutateFinance(payload)
-        .then((next) => setState(next))
-        .catch((nextError) => setError((nextError as Error).message));
-    });
+    const snapshot = state;
+    if (optimistic) {
+      setState((current) => optimistic(current));
+    }
+    setIsPending(true);
+    mutateFinance(payload)
+      .then((next) => setState(next))
+      .catch((nextError) => {
+        if (optimistic) setState(snapshot);
+        setError((nextError as Error).message);
+      })
+      .finally(() => setIsPending(false));
   }
 
   function beginEditingExpense(item: ExpenseEntry) {
@@ -1151,7 +1169,21 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   }
 
   function moveExpense(expenseId: string, category: ExpenseCategory) {
-    runMutation({ op: 'move_expense', expenseId, category });
+    runMutation(
+      { op: 'move_expense', expenseId, category },
+      (current) => ({
+        ...current,
+        expenses: current.expenses.map((entry) =>
+          entry.id === expenseId
+            ? {
+                ...entry,
+                category,
+                subCategory: category === 'maintenance' ? entry.subCategory : undefined,
+              }
+            : entry,
+        ),
+      }),
+    );
   }
 
   function handleDropCategory(category: ExpenseCategory) {
@@ -1162,7 +1194,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   }
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${isDraggingExpense ? 'expense-board-dragging' : ''}`}>
       {clearDialog && (
         <ClearExpenseDialog
           dialog={clearDialog}
@@ -1209,10 +1241,14 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             setFilter={setPredictedFilter}
             draggedExpenseId={draggedExpenseId}
             dragOverCategory={dragOverCategory}
-            onDragStart={(item) => setDraggedExpenseId(item.id)}
+            onDragStart={(item) => {
+              setDraggedExpenseId(item.id);
+              setIsDraggingExpense(true);
+            }}
             onDragEnd={() => {
               setDraggedExpenseId(null);
               setDragOverCategory(null);
+              setIsDraggingExpense(false);
             }}
             onDragEnterCategory={setDragOverCategory}
             onDropCategory={handleDropCategory}
@@ -1254,10 +1290,14 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             }
             draggedExpenseId={draggedExpenseId}
             dragOverCategory={dragOverCategory}
-            onDragStart={(item) => setDraggedExpenseId(item.id)}
+            onDragStart={(item) => {
+              setDraggedExpenseId(item.id);
+              setIsDraggingExpense(true);
+            }}
             onDragEnd={() => {
               setDraggedExpenseId(null);
               setDragOverCategory(null);
+              setIsDraggingExpense(false);
             }}
             onDragEnterCategory={setDragOverCategory}
             onDropCategory={handleDropCategory}
@@ -1319,9 +1359,55 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
                     index={index}
                     length={state.buyList.length}
                     affordable={affordableSet.has(item.id)}
-                    onMove={(itemId, direction) => runMutation({ op: 'move_buy_item', itemId, direction })}
-                    onRemove={(itemId) => runMutation({ op: 'remove_buy_item', itemId })}
-                    onBought={(itemId) => runMutation({ op: 'mark_buy_item_bought', itemId, category: 'maintenance' })}
+                    onMove={(itemId, direction) =>
+                      runMutation(
+                        { op: 'move_buy_item', itemId, direction },
+                        (current) => {
+                          const index = current.buyList.findIndex((entry) => entry.id === itemId);
+                          if (index === -1) return current;
+                          const target =
+                            direction === 'up'
+                              ? Math.max(0, index - 1)
+                              : Math.min(current.buyList.length - 1, index + 1);
+                          if (target === index) return current;
+                          const nextBuyList = [...current.buyList];
+                          const [item] = nextBuyList.splice(index, 1);
+                          nextBuyList.splice(target, 0, item);
+                          return { ...current, buyList: nextBuyList };
+                        },
+                      )
+                    }
+                    onRemove={(itemId) =>
+                      runMutation(
+                        { op: 'remove_buy_item', itemId },
+                        (current) => ({ ...current, buyList: current.buyList.filter((entry) => entry.id !== itemId) }),
+                      )
+                    }
+                    onBought={(itemId) =>
+                      runMutation(
+                        { op: 'mark_buy_item_bought', itemId, category: 'maintenance' },
+                        (current) => {
+                          const item = current.buyList.find((entry) => entry.id === itemId);
+                          if (!item) return current;
+                          const nextExpense: ExpenseEntry = {
+                            id: `optimistic-${item.id}`,
+                            title: item.title,
+                            amount: item.price,
+                            bucket: 'actual',
+                            category: 'maintenance',
+                            cadence: 'one-time',
+                            spentOn: new Date().toISOString(),
+                            notes: item.notes,
+                            imageUrl: item.imageUrl,
+                          };
+                          return {
+                            ...current,
+                            buyList: current.buyList.filter((entry) => entry.id !== itemId),
+                            expenses: [nextExpense, ...current.expenses],
+                          };
+                        },
+                      )
+                    }
                   />
                 ))}
               </ol>

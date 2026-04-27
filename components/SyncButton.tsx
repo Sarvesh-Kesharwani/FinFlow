@@ -14,6 +14,7 @@ export function SyncButton() {
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const syncingRef = useRef(false);
   const checkingRef = useRef(false);
+  const syncTimerRef = useRef<number | null>(null);
 
   const checkSync = useCallback(async () => {
     if (syncingRef.current || checkingRef.current) return;
@@ -107,14 +108,25 @@ export function SyncButton() {
       setState('unsynced');
 
       if (detail?.autoSync) {
-        void pushSync(true);
+        if (syncTimerRef.current) {
+          window.clearTimeout(syncTimerRef.current);
+        }
+        syncTimerRef.current = window.setTimeout(() => {
+          syncTimerRef.current = null;
+          void pushSync(true);
+        }, 1200);
       } else {
         void checkSync();
       }
     };
 
     window.addEventListener(FINANCE_CHANGED_EVENT, onFinanceChanged);
-    return () => window.removeEventListener(FINANCE_CHANGED_EVENT, onFinanceChanged);
+    return () => {
+      if (syncTimerRef.current) {
+        window.clearTimeout(syncTimerRef.current);
+      }
+      window.removeEventListener(FINANCE_CHANGED_EVENT, onFinanceChanged);
+    };
   }, [checkSync, pushSync]);
 
   useEffect(() => {
