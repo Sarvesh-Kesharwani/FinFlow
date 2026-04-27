@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { FeatureRequestMenu } from '@/components/FeatureRequestMenu';
 
 const TABS = [
   { href: '/', label: 'Dashboard', emoji: '💰' },
@@ -14,6 +15,7 @@ export function NavTabs() {
 
   return (
     <nav className="flex flex-wrap gap-2">
+      <FeatureRequestMenu />
       {TABS.map((tab) => {
         const active = pathname === tab.href;
         return (

@@ -18,6 +18,7 @@ export interface ExpenseEntry {
   cadence: ExpenseCadence;
   spentOn: string; // ISO date
   notes?: string;
+  imageUrl?: string;
 }
 
 export interface BuyListItem {
@@ -29,18 +30,27 @@ export interface BuyListItem {
   currency?: string;
   notes?: string;
   createdAt: string; // ISO datetime
+  imageUrl?: string;
+}
+
+export interface FeatureRequestEntry {
+  id: string;
+  description: string;
+  createdAt: string;
 }
 
 export interface FinanceStore {
   monthlyIncome: number;
   expenses: ExpenseEntry[];
   buyList: BuyListItem[];
+  requests: FeatureRequestEntry[];
 }
 
 export interface FinanceSummary {
   monthlyExpectedExpenses: number;
   currentMonthSpent: number;
   currentMonthRemaining: number;
+  avgMonthlyExpense: number;
   canBuyCountThisMonth: number;
   affordableItemIds: string[];
 }
@@ -49,6 +59,7 @@ export const DEFAULT_FINANCE_STORE: FinanceStore = {
   monthlyIncome: 0,
   expenses: [],
   buyList: [],
+  requests: [],
 };
 
 export const EXPENSE_CATEGORIES: Array<{ value: ExpenseCategory; label: string }> = [

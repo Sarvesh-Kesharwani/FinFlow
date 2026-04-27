@@ -1,6 +1,7 @@
 'use client';
 
 import { type Dispatch, type ReactNode, type SetStateAction, useMemo, useState, useTransition } from 'react';
+import { ItemAvatar } from '@/components/ItemAvatar';
 import { CsvImportButton } from '@/components/CsvImportButton';
 import { summarizeFinance } from '@/lib/finance-math';
 import {
@@ -30,6 +31,64 @@ type ExpenseFormState = {
   subCategory: string;
 };
 
+type FilterPeriod = 'all' | 'day' | 'week' | 'month' | 'year';
+
+type ActualFilter = {
+  kind: 'actual';
+  period: FilterPeriod;
+  reference: string;
+};
+
+type PredictedFilter = {
+  kind: 'predicted';
+  cadence: ExpenseCadence | 'all';
+};
+
+type FilterState = ActualFilter | PredictedFilter;
+
+type ClearDialogState = {
+  bucket: ExpenseBucket;
+  challenge: string;
+  label: string;
+} | null;
+
+type FinanceOp =
+  | {
+      op: 'add_expense';
+      title: string;
+      amount: number;
+      bucket: ExpenseBucket;
+      category: ExpenseCategory;
+      subCategory?: string;
+      frequency?: ExpenseCadence;
+      cadence?: ExpenseCadence;
+      spentOn: string;
+      notes?: string;
+      imageUrl?: string;
+    }
+  | {
+      op: 'edit_expense';
+      expenseId: string;
+      title: string;
+      amount: number;
+      bucket: ExpenseBucket;
+      category: ExpenseCategory;
+      subCategory?: string;
+      frequency?: ExpenseCadence;
+      cadence?: ExpenseCadence;
+      spentOn: string;
+      notes?: string;
+      imageUrl?: string;
+    }
+  | { op: 'remove_expense'; expenseId: string }
+  | { op: 'move_expense'; expenseId: string; category: ExpenseCategory }
+  | { op: 'clear_expenses'; bucket: ExpenseBucket }
+  | { op: 'bulk_add_expenses'; expenses: unknown[] }
+  | { op: 'add_buy_item'; url: string; notes?: string }
+  | { op: 'remove_buy_item'; itemId: string }
+  | { op: 'move_buy_item'; itemId: string; direction: 'up' | 'down' }
+  | { op: 'mark_buy_item_bought'; itemId: string; category?: ExpenseCategory; subCategory?: string };
+
 function createExpenseForm(): ExpenseFormState {
   return {
     title: '',
@@ -54,21 +113,6 @@ function createExpenseFormFromEntry(entry: ExpenseEntry): ExpenseFormState {
   };
 }
 
-type FilterPeriod = 'all' | 'day' | 'week' | 'month' | 'year';
-
-type ActualFilter = {
-  kind: 'actual';
-  period: FilterPeriod;
-  reference: string; // YYYY-MM-DD
-};
-
-type PredictedFilter = {
-  kind: 'predicted';
-  cadence: ExpenseCadence | 'all';
-};
-
-type FilterState = ActualFilter | PredictedFilter;
-
 function createActualFilter(): ActualFilter {
   return { kind: 'actual', period: 'all', reference: new Date().toISOString().slice(0, 10) };
 }
@@ -77,10 +121,14 @@ function createPredictedFilter(): PredictedFilter {
   return { kind: 'predicted', cadence: 'all' };
 }
 
+function randomChallenge(): string {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
 function startOfWeek(date: Date): Date {
   const out = new Date(date);
-  const day = out.getDay(); // 0 = Sunday
-  const diff = (day + 6) % 7; // Monday-based
+  const day = out.getDay();
+  const diff = (day + 6) % 7;
   out.setHours(0, 0, 0, 0);
   out.setDate(out.getDate() - diff);
   return out;
@@ -99,11 +147,7 @@ function matchesFilter(entry: ExpenseEntry, filter: FilterState): boolean {
   if (Number.isNaN(at.getTime())) return false;
 
   if (filter.period === 'day') {
-    return (
-      at.getFullYear() === ref.getFullYear() &&
-      at.getMonth() === ref.getMonth() &&
-      at.getDate() === ref.getDate()
-    );
+    return at.getFullYear() === ref.getFullYear() && at.getMonth() === ref.getMonth() && at.getDate() === ref.getDate();
   }
   if (filter.period === 'week') {
     const start = startOfWeek(ref);
@@ -121,11 +165,11 @@ function matchesFilter(entry: ExpenseEntry, filter: FilterState): boolean {
 }
 
 function categoryLabel(value: ExpenseCategory): string {
-  return EXPENSE_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+  return EXPENSE_CATEGORIES.find((category) => category.value === value)?.label ?? value;
 }
 
 function subCategoryLabel(value: string): string {
-  return MAINTENANCE_SUBCATEGORIES.find((s) => s.value === value)?.label ?? value;
+  return MAINTENANCE_SUBCATEGORIES.find((category) => category.value === value)?.label ?? value;
 }
 
 function formatMoney(amount: number, currency = 'INR'): string {
@@ -165,39 +209,6 @@ function getVisibleExpenseNotes(item: ExpenseEntry): string | null {
   return item.notes;
 }
 
-type FinanceOp =
-  | {
-      op: 'add_expense';
-      title: string;
-      amount: number;
-      bucket: ExpenseBucket;
-      category: ExpenseCategory;
-      subCategory?: string;
-      frequency?: ExpenseCadence;
-      cadence?: ExpenseCadence;
-      spentOn: string;
-      notes?: string;
-    }
-  | {
-      op: 'edit_expense';
-      expenseId: string;
-      title: string;
-      amount: number;
-      bucket: ExpenseBucket;
-      category: ExpenseCategory;
-      subCategory?: string;
-      frequency?: ExpenseCadence;
-      cadence?: ExpenseCadence;
-      spentOn: string;
-      notes?: string;
-    }
-  | { op: 'remove_expense'; expenseId: string }
-  | { op: 'move_expense'; expenseId: string; category: ExpenseCategory }
-  | { op: 'bulk_add_expenses'; expenses: unknown[] }
-  | { op: 'add_buy_item'; url: string; notes?: string }
-  | { op: 'remove_buy_item'; itemId: string }
-  | { op: 'move_buy_item'; itemId: string; direction: 'up' | 'down' };
-
 async function mutateFinance(payload: FinanceOp): Promise<FinanceStore> {
   const res = await fetch('/api/finance/state', {
     method: 'POST',
@@ -212,54 +223,120 @@ async function mutateFinance(payload: FinanceOp): Promise<FinanceStore> {
   return data.state as FinanceStore;
 }
 
+function SummaryCards({
+  summary,
+}: {
+  summary: ReturnType<typeof summarizeFinance>;
+}) {
+  const cards = [
+    { label: 'Expected / Month', value: formatMoney(summary.monthlyExpectedExpenses), tone: 'card-rose' },
+    { label: 'Spent This Month', value: formatMoney(summary.currentMonthSpent), tone: 'card-amber' },
+    { label: 'Avg Monthly Expense', value: formatMoney(summary.avgMonthlyExpense), tone: 'card-green' },
+    { label: 'Remaining', value: formatMoney(summary.currentMonthRemaining), tone: 'card-rose' },
+    { label: 'Can Buy', value: String(summary.canBuyCountThisMonth), tone: 'card-amber' },
+  ];
+
+  return (
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      {cards.map((card) => (
+        <div key={card.label} className={`card-3d ${card.tone}`}>
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-white/80">{card.label}</p>
+          <p className="mt-2 text-2xl font-black">{card.value}</p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ClearExpenseDialog({
+  dialog,
+  value,
+  setValue,
+  onCancel,
+  onConfirm,
+  isPending,
+}: {
+  dialog: NonNullable<ClearDialogState>;
+  value: string;
+  setValue: Dispatch<SetStateAction<string>>;
+  onCancel: () => void;
+  onConfirm: () => void;
+  isPending: boolean;
+}) {
+  const matches = value.trim().toUpperCase() === dialog.challenge;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 px-4">
+      <div className="w-full max-w-md rounded-3xl border-2 border-duored-border bg-white p-5 shadow-roseCard">
+        <h3 className="text-lg font-extrabold text-duored-deep">Clear {dialog.label}</h3>
+        <p className="mt-2 text-sm font-semibold text-duored-muted">
+          Type <span className="rounded-md bg-duored-soft px-2 py-1 font-black text-duored-deep">{dialog.challenge}</span> to clear this full expense list.
+        </p>
+        <input
+          className="text-input mt-4 w-full"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder="Enter the random string"
+        />
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button className="chip-soft" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="chip-danger" type="button" disabled={!matches || isPending} onClick={onConfirm}>
+            Clear list
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExpenseRow({
   item,
   onRemove,
   onEdit,
-  onMove,
   showFrequency,
+  onDragStart,
+  onDragEnd,
 }: {
   item: ExpenseEntry;
   onRemove: (id: string) => void;
   onEdit: (item: ExpenseEntry) => void;
-  onMove: (id: string, category: ExpenseCategory) => void;
   showFrequency: boolean;
+  onDragStart: (item: ExpenseEntry) => void;
+  onDragEnd: () => void;
 }) {
   const frequencyLabel = getFrequencyLabel(item);
   const visibleNotes = getVisibleExpenseNotes(item);
 
   return (
-    <li className="lift-card flex-col items-start sm:flex-row">
-      <div className="min-w-0 flex-1">
-        <p className="font-extrabold text-duored-ink">{formatExpenseTitle(item.title)}</p>
-        <div className="text-xs text-duored-muted">
-          {showFrequency && <p>Freq: {frequencyLabel}</p>}
-          <p>{new Date(item.spentOn).toLocaleDateString()}</p>
-          <p>
-            {categoryLabel(item.category)}
-            {item.category === 'maintenance' && item.subCategory
-              ? ` > ${subCategoryLabel(item.subCategory)}`
-              : ''}
-          </p>
-          {visibleNotes && <p className="mt-1 break-words">{visibleNotes}</p>}
+    <li
+      className="lift-card flex-col items-start sm:flex-row"
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', item.id);
+        onDragStart(item);
+      }}
+      onDragEnd={onDragEnd}
+    >
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <ItemAvatar title={item.title} imageUrl={item.imageUrl} />
+        <div className="min-w-0 flex-1">
+          <p className="font-extrabold text-duored-ink">{formatExpenseTitle(item.title)}</p>
+          <div className="text-xs text-duored-muted">
+            {showFrequency && <p>Freq: {frequencyLabel}</p>}
+            <p>{new Date(item.spentOn).toLocaleDateString()}</p>
+            <p>
+              {categoryLabel(item.category)}
+              {item.category === 'maintenance' && item.subCategory ? ` > ${subCategoryLabel(item.subCategory)}` : ''}
+            </p>
+            {visibleNotes && <p className="mt-1 break-words">{visibleNotes}</p>}
+          </div>
         </div>
       </div>
       <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
         <p className="font-extrabold text-duored-deep">{formatMoney(item.amount)}</p>
-        <select
-          className="text-input min-w-[8.5rem] py-1 text-sm"
-          value={item.category}
-          onChange={(e) => {
-            const nextCategory = e.target.value as ExpenseCategory;
-            if (nextCategory !== item.category) onMove(item.id, nextCategory);
-          }}
-        >
-          {EXPENSE_CATEGORIES.map((category) => (
-            <option key={`${item.id}-${category.value}`} value={category.value}>
-              Move to {category.label}
-            </option>
-          ))}
-        </select>
         <button className="chip-soft" onClick={() => onEdit(item)} type="button">
           Edit
         </button>
@@ -278,6 +355,7 @@ function BuyRow({
   affordable,
   onMove,
   onRemove,
+  onBought,
 }: {
   item: BuyListItem;
   index: number;
@@ -285,19 +363,26 @@ function BuyRow({
   affordable: boolean;
   onMove: (id: string, direction: 'up' | 'down') => void;
   onRemove: (id: string) => void;
+  onBought: (id: string) => void;
 }) {
   return (
-    <li className={`lift-card ${affordable ? 'ring-2 ring-emerald-300' : ''}`}>
-      <div className="min-w-0">
-        <p className="truncate font-extrabold text-duored-ink">{item.title}</p>
-        <p className="mt-1 text-xs font-semibold text-duored-muted">Source: {item.sourcePlatform || 'Online Store'}</p>
-        <a href={item.url} target="_blank" rel="noreferrer" className="block truncate text-xs text-duored-link underline">
-          {item.url}
-        </a>
-        {item.notes && <p className="mt-1 text-xs text-duored-muted">{item.notes}</p>}
+    <li className={`lift-card flex-col items-start ${affordable ? 'ring-2 ring-emerald-300' : ''} sm:flex-row`}>
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <ItemAvatar title={item.title} imageUrl={item.imageUrl} />
+        <div className="min-w-0 flex-1">
+          <p className="font-extrabold text-duored-ink">{item.title}</p>
+          <p className="mt-1 text-xs font-semibold text-duored-muted">Source: {item.sourcePlatform || 'Online Store'}</p>
+          <a href={item.url} target="_blank" rel="noreferrer" className="block truncate text-xs text-duored-link underline">
+            {item.url}
+          </a>
+          {item.notes && <p className="mt-1 text-xs text-duored-muted">{item.notes}</p>}
+        </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
         <span className="chip-price">{formatMoney(item.price, item.currency || 'INR')}</span>
+        <button className="btn-duored px-3 py-1 text-xs" onClick={() => onBought(item.id)} type="button">
+          Mark Bought
+        </button>
         <button className="chip-soft" onClick={() => onMove(item.id, 'up')} disabled={index === 0} type="button">
           Up
         </button>
@@ -312,199 +397,6 @@ function BuyRow({
   );
 }
 
-function ExpenseGroupedList({
-  expenses,
-  filter,
-  showFrequency,
-  editingExpenseId,
-  editForm,
-  setEditForm,
-  onStartEdit,
-  onCancelEdit,
-  onSaveEdit,
-  onRemove,
-  onMove,
-}: {
-  expenses: ExpenseEntry[];
-  filter: FilterState;
-  showFrequency: boolean;
-  editingExpenseId: string | null;
-  editForm: ExpenseFormState | null;
-  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
-  onStartEdit: (item: ExpenseEntry) => void;
-  onCancelEdit: () => void;
-  onSaveEdit: (expenseId: string) => void;
-  onRemove: (id: string) => void;
-  onMove: (id: string, category: ExpenseCategory) => void;
-}) {
-  const filtered = useMemo(
-    () => expenses.filter((e) => matchesFilter(e, filter)),
-    [expenses, filter],
-  );
-
-  const grouped = useMemo(() => {
-    const byCategory = new Map<ExpenseCategory, ExpenseEntry[]>();
-    for (const entry of filtered) {
-      const list = byCategory.get(entry.category);
-      if (list) list.push(entry);
-      else byCategory.set(entry.category, [entry]);
-    }
-    const order: ExpenseCategory[] = EXPENSE_CATEGORIES.map((c) => c.value);
-    return order.map((cat) => ({ category: cat, items: byCategory.get(cat) ?? [] }));
-  }, [filtered]);
-
-  function renderCategoryBlock(category: ExpenseCategory, items: ExpenseEntry[]) {
-    const total = items.reduce((sum, e) => sum + e.amount, 0);
-    const isSavings = category === 'savings';
-
-    return (
-      <div key={category} className="space-y-2 rounded-2xl border border-duored-soft/70 bg-white/60 p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <h4 className="text-sm font-extrabold uppercase tracking-[0.12em] text-duored-deep">
-              {categoryLabel(category)} ({items.length})
-            </h4>
-            {isSavings && (
-              <button
-                className="chip-soft h-6 w-6 p-0 text-center font-extrabold"
-                type="button"
-                title="Transfer to saving acct/ purchase of gold"
-                aria-label="Transfer to saving acct/ purchase of gold"
-              >
-                i
-              </button>
-            )}
-          </div>
-          <span className="text-xs font-bold text-duored-muted">{formatMoney(total)}</span>
-        </div>
-        {items.length === 0 ? (
-          <p className="text-sm font-semibold text-duored-muted">No expenses in this category.</p>
-        ) : category === 'maintenance' ? (
-          <MaintenanceSubGroups
-            items={items}
-            showFrequency={showFrequency}
-            editingExpenseId={editingExpenseId}
-            editForm={editForm}
-            setEditForm={setEditForm}
-            onStartEdit={onStartEdit}
-            onCancelEdit={onCancelEdit}
-            onSaveEdit={onSaveEdit}
-            onRemove={onRemove}
-            onMove={onMove}
-          />
-        ) : (
-          <ul className="space-y-2">
-            {items.map((entry) => (
-              <ExpenseListItem
-                key={entry.id}
-                item={entry}
-                showFrequency={showFrequency}
-                isEditing={editingExpenseId === entry.id}
-                editForm={editForm}
-                setEditForm={setEditForm}
-                onStartEdit={onStartEdit}
-                onCancelEdit={onCancelEdit}
-                onSaveEdit={onSaveEdit}
-                onRemove={onRemove}
-                onMove={onMove}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-    );
-  }
-
-  if (filtered.length === 0) {
-    return <p className="font-semibold text-duored-muted">No expenses match this filter.</p>;
-  }
-
-  if (filter.kind === 'actual') {
-    return (
-      <div className="grid gap-4 lg:grid-cols-3">
-        {grouped.map(({ category, items }) => renderCategoryBlock(category, items))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {grouped.filter(({ items }) => items.length > 0).map(({ category, items }) => renderCategoryBlock(category, items))}
-    </div>
-  );
-}
-
-function MaintenanceSubGroups({
-  items,
-  showFrequency,
-  editingExpenseId,
-  editForm,
-  setEditForm,
-  onStartEdit,
-  onCancelEdit,
-  onSaveEdit,
-  onRemove,
-  onMove,
-}: {
-  items: ExpenseEntry[];
-  showFrequency: boolean;
-  editingExpenseId: string | null;
-  editForm: ExpenseFormState | null;
-  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
-  onStartEdit: (item: ExpenseEntry) => void;
-  onCancelEdit: () => void;
-  onSaveEdit: (expenseId: string) => void;
-  onRemove: (id: string) => void;
-  onMove: (id: string, category: ExpenseCategory) => void;
-}) {
-  const buckets = useMemo(() => {
-    const map = new Map<string, ExpenseEntry[]>();
-    for (const entry of items) {
-      const key = entry.subCategory || '_unset';
-      const list = map.get(key);
-      if (list) list.push(entry);
-      else map.set(key, [entry]);
-    }
-    const ordered: Array<{ key: string; label: string; items: ExpenseEntry[] }> = [];
-    for (const sub of MAINTENANCE_SUBCATEGORIES) {
-      const list = map.get(sub.value);
-      if (list && list.length) ordered.push({ key: sub.value, label: sub.label, items: list });
-    }
-    const unset = map.get('_unset');
-    if (unset && unset.length) ordered.push({ key: '_unset', label: 'Uncategorized', items: unset });
-    return ordered;
-  }, [items]);
-
-  return (
-    <div className="space-y-2 pl-2">
-      {buckets.map((bucket) => (
-        <div key={bucket.key} className="space-y-2">
-          <p className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">
-            - {bucket.label} ({bucket.items.length})
-          </p>
-          <ul className="space-y-2">
-            {bucket.items.map((entry) => (
-              <ExpenseListItem
-                key={entry.id}
-                item={entry}
-                showFrequency={showFrequency}
-                isEditing={editingExpenseId === entry.id}
-                editForm={editForm}
-                setEditForm={setEditForm}
-                onStartEdit={onStartEdit}
-                onCancelEdit={onCancelEdit}
-                onSaveEdit={onSaveEdit}
-                onRemove={onRemove}
-                onMove={onMove}
-              />
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ExpenseListItem({
   item,
   showFrequency,
@@ -515,7 +407,8 @@ function ExpenseListItem({
   onCancelEdit,
   onSaveEdit,
   onRemove,
-  onMove,
+  onDragStart,
+  onDragEnd,
 }: {
   item: ExpenseEntry;
   showFrequency: boolean;
@@ -526,7 +419,8 @@ function ExpenseListItem({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
-  onMove: (id: string, category: ExpenseCategory) => void;
+  onDragStart: (item: ExpenseEntry) => void;
+  onDragEnd: () => void;
 }) {
   if (isEditing && editForm) {
     return (
@@ -535,7 +429,7 @@ function ExpenseListItem({
           <input
             className="text-input"
             value={editForm.title}
-            onChange={(e) => setEditForm((s) => (s ? { ...s, title: e.target.value } : s))}
+            onChange={(event) => setEditForm((state) => (state ? { ...state, title: event.target.value } : state))}
             placeholder="Expense name"
           />
           <input
@@ -544,27 +438,27 @@ function ExpenseListItem({
             min="0"
             step="0.01"
             value={editForm.amount}
-            onChange={(e) => setEditForm((s) => (s ? { ...s, amount: e.target.value } : s))}
+            onChange={(event) => setEditForm((state) => (state ? { ...state, amount: event.target.value } : state))}
             placeholder="Price"
           />
           <select
             className="text-input"
             value={editForm.category}
-            onChange={(e) =>
-              setEditForm((s) =>
-                s
+            onChange={(event) =>
+              setEditForm((state) =>
+                state
                   ? {
-                      ...s,
-                      category: e.target.value as ExpenseCategory,
-                      subCategory: e.target.value === 'maintenance' ? s.subCategory : '',
+                      ...state,
+                      category: event.target.value as ExpenseCategory,
+                      subCategory: event.target.value === 'maintenance' ? state.subCategory : '',
                     }
-                  : s,
+                  : state,
               )
             }
           >
-            {EXPENSE_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
+            {EXPENSE_CATEGORIES.map((category) => (
+              <option key={category.value} value={category.value}>
+                {category.label}
               </option>
             ))}
           </select>
@@ -572,12 +466,12 @@ function ExpenseListItem({
             <select
               className="text-input"
               value={editForm.subCategory}
-              onChange={(e) => setEditForm((s) => (s ? { ...s, subCategory: e.target.value } : s))}
+              onChange={(event) => setEditForm((state) => (state ? { ...state, subCategory: event.target.value } : state))}
             >
               <option value="">Subcategory (optional)</option>
-              {MAINTENANCE_SUBCATEGORIES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
+              {MAINTENANCE_SUBCATEGORIES.map((category) => (
+                <option key={category.value} value={category.value}>
+                  {category.label}
                 </option>
               ))}
             </select>
@@ -587,15 +481,15 @@ function ExpenseListItem({
               <select
                 className="text-input"
                 value={editForm.frequency}
-                onChange={(e) =>
-                  setEditForm((s) =>
-                    s
+                onChange={(event) =>
+                  setEditForm((state) =>
+                    state
                       ? {
-                          ...s,
+                          ...state,
                           mode: 'repetitive',
-                          frequency: e.target.value as '' | ExpenseCadence,
+                          frequency: event.target.value as '' | ExpenseCadence,
                         }
-                      : s,
+                      : state,
                   )
                 }
               >
@@ -610,7 +504,7 @@ function ExpenseListItem({
                 <input
                   className="text-input"
                   value={editForm.customFrequency}
-                  onChange={(e) => setEditForm((s) => (s ? { ...s, customFrequency: e.target.value } : s))}
+                  onChange={(event) => setEditForm((state) => (state ? { ...state, customFrequency: event.target.value } : state))}
                   placeholder="Custom frequency (for example: every 45 days)"
                 />
               ) : (
@@ -643,10 +537,231 @@ function ExpenseListItem({
       item={item}
       onEdit={onStartEdit}
       onRemove={onRemove}
-      onMove={onMove}
       showFrequency={showFrequency}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
     />
   );
+}
+
+function MaintenanceSubGroups({
+  items,
+  showFrequency,
+  editingExpenseId,
+  editForm,
+  setEditForm,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onRemove,
+  onDragStart,
+  onDragEnd,
+}: {
+  items: ExpenseEntry[];
+  showFrequency: boolean;
+  editingExpenseId: string | null;
+  editForm: ExpenseFormState | null;
+  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
+  onStartEdit: (item: ExpenseEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (expenseId: string) => void;
+  onRemove: (id: string) => void;
+  onDragStart: (item: ExpenseEntry) => void;
+  onDragEnd: () => void;
+}) {
+  const buckets = useMemo(() => {
+    const map = new Map<string, ExpenseEntry[]>();
+    for (const entry of items) {
+      const key = entry.subCategory || '_unset';
+      const list = map.get(key);
+      if (list) list.push(entry);
+      else map.set(key, [entry]);
+    }
+
+    const ordered: Array<{ key: string; label: string; items: ExpenseEntry[] }> = [];
+    for (const subCategory of MAINTENANCE_SUBCATEGORIES) {
+      const list = map.get(subCategory.value);
+      if (list && list.length) ordered.push({ key: subCategory.value, label: subCategory.label, items: list });
+    }
+    const unset = map.get('_unset');
+    if (unset && unset.length) ordered.push({ key: '_unset', label: 'Uncategorized', items: unset });
+    return ordered;
+  }, [items]);
+
+  return (
+    <div className="space-y-2 pl-2">
+      {buckets.map((bucket) => (
+        <div key={bucket.key} className="space-y-2">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">
+            - {bucket.label} ({bucket.items.length})
+          </p>
+          <ul className="space-y-2">
+            {bucket.items.map((entry) => (
+              <ExpenseListItem
+                key={entry.id}
+                item={entry}
+                showFrequency={showFrequency}
+                isEditing={editingExpenseId === entry.id}
+                editForm={editForm}
+                setEditForm={setEditForm}
+                onStartEdit={onStartEdit}
+                onCancelEdit={onCancelEdit}
+                onSaveEdit={onSaveEdit}
+                onRemove={onRemove}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+              />
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExpenseGroupedList({
+  expenses,
+  filter,
+  showFrequency,
+  editingExpenseId,
+  editForm,
+  setEditForm,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onRemove,
+  draggedExpenseId,
+  dragOverCategory,
+  onDragStart,
+  onDragEnd,
+  onDragEnterCategory,
+  onDropCategory,
+}: {
+  expenses: ExpenseEntry[];
+  filter: FilterState;
+  showFrequency: boolean;
+  editingExpenseId: string | null;
+  editForm: ExpenseFormState | null;
+  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
+  onStartEdit: (item: ExpenseEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (expenseId: string) => void;
+  onRemove: (id: string) => void;
+  draggedExpenseId: string | null;
+  dragOverCategory: ExpenseCategory | null;
+  onDragStart: (item: ExpenseEntry) => void;
+  onDragEnd: () => void;
+  onDragEnterCategory: (category: ExpenseCategory) => void;
+  onDropCategory: (category: ExpenseCategory) => void;
+}) {
+  const filtered = useMemo(() => expenses.filter((entry) => matchesFilter(entry, filter)), [expenses, filter]);
+  const grouped = useMemo(() => {
+    const byCategory = new Map<ExpenseCategory, ExpenseEntry[]>();
+    for (const entry of filtered) {
+      const list = byCategory.get(entry.category);
+      if (list) list.push(entry);
+      else byCategory.set(entry.category, [entry]);
+    }
+    return EXPENSE_CATEGORIES.map((category) => ({
+      category: category.value,
+      items: byCategory.get(category.value) ?? [],
+    }));
+  }, [filtered]);
+
+  if (filtered.length === 0) {
+    return <p className="font-semibold text-duored-muted">No expenses match this filter.</p>;
+  }
+
+  function renderCategoryBlock(category: ExpenseCategory, items: ExpenseEntry[]) {
+    const isSavings = category === 'savings';
+    const total = items.reduce((sum, entry) => sum + entry.amount, 0);
+    const isDropActive = draggedExpenseId !== null && dragOverCategory === category;
+
+    return (
+      <div
+        key={category}
+        className={[
+          'space-y-2 rounded-2xl border bg-white/60 p-3 transition-colors',
+          isDropActive ? 'border-duored-main bg-duored-soft/40' : 'border-duored-soft/70',
+        ].join(' ')}
+        onDragOver={(event) => {
+          if (!draggedExpenseId) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+        }}
+        onDragEnter={() => {
+          if (draggedExpenseId) onDragEnterCategory(category);
+        }}
+        onDrop={(event) => {
+          if (!draggedExpenseId) return;
+          event.preventDefault();
+          onDropCategory(category);
+        }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-extrabold uppercase tracking-[0.12em] text-duored-deep">
+              {categoryLabel(category)} ({items.length})
+            </h4>
+            {isSavings && (
+              <button
+                className="chip-soft h-6 w-6 p-0 text-center font-extrabold"
+                type="button"
+                title="Transfer to saving acct/ purchase of gold"
+                aria-label="Transfer to saving acct/ purchase of gold"
+              >
+                i
+              </button>
+            )}
+          </div>
+          <span className="text-xs font-bold text-duored-muted">{formatMoney(total)}</span>
+        </div>
+
+        {items.length === 0 ? (
+          <p className="text-sm font-semibold text-duored-muted">Drop an expense here.</p>
+        ) : category === 'maintenance' ? (
+          <MaintenanceSubGroups
+            items={items}
+            showFrequency={showFrequency}
+            editingExpenseId={editingExpenseId}
+            editForm={editForm}
+            setEditForm={setEditForm}
+            onStartEdit={onStartEdit}
+            onCancelEdit={onCancelEdit}
+            onSaveEdit={onSaveEdit}
+            onRemove={onRemove}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          />
+        ) : (
+          <ul className="space-y-2">
+            {items.map((entry) => (
+              <ExpenseListItem
+                key={entry.id}
+                item={entry}
+                showFrequency={showFrequency}
+                isEditing={editingExpenseId === entry.id}
+                editForm={editForm}
+                setEditForm={setEditForm}
+                onStartEdit={onStartEdit}
+                onCancelEdit={onCancelEdit}
+                onSaveEdit={onSaveEdit}
+                onRemove={onRemove}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
+  if (filter.kind === 'actual') {
+    return <div className="grid gap-4 lg:grid-cols-3">{grouped.map(({ category, items }) => renderCategoryBlock(category, items))}</div>;
+  }
+
+  return <div className="space-y-4">{grouped.map(({ category, items }) => renderCategoryBlock(category, items))}</div>;
 }
 
 function ExpenseEditor({
@@ -666,10 +781,16 @@ function ExpenseEditor({
   onCancelEdit,
   onSaveEdit,
   onRemoveExpense,
-  onMoveExpense,
+  onRequestClear,
   filter,
   setFilter,
   headerAction,
+  draggedExpenseId,
+  dragOverCategory,
+  onDragStart,
+  onDragEnd,
+  onDragEnterCategory,
+  onDropCategory,
 }: {
   bucket: ExpenseBucket;
   title: string;
@@ -687,31 +808,42 @@ function ExpenseEditor({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemoveExpense: (expenseId: string) => void;
-  onMoveExpense: (expenseId: string, category: ExpenseCategory) => void;
+  onRequestClear: () => void;
   filter: FilterState;
   setFilter: Dispatch<SetStateAction<FilterState>>;
   headerAction?: ReactNode;
+  draggedExpenseId: string | null;
+  dragOverCategory: ExpenseCategory | null;
+  onDragStart: (item: ExpenseEntry) => void;
+  onDragEnd: () => void;
+  onDragEnterCategory: (category: ExpenseCategory) => void;
+  onDropCategory: (category: ExpenseCategory) => void;
 }) {
   const supportsFrequency = bucket === 'predicted';
 
   return (
     <section className="card-panel w-full">
-      <div className="flex items-center gap-2">
-        <h2 className="section-title">{title}</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="section-title mb-0">{title}</h2>
         {infoText && (
           <button className="chip-soft h-6 w-6 p-0 text-center font-extrabold" type="button" title={infoText} aria-label={infoText}>
             i
           </button>
         )}
-        {headerAction && <div className="ml-auto">{headerAction}</div>}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {headerAction}
+          <button className="chip-danger" type="button" onClick={onRequestClear}>
+            Clear list
+          </button>
+        </div>
       </div>
 
-      <h3 className="mb-2 mt-1 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">add_expense</h3>
+      <h3 className="mb-2 mt-4 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">add_expense</h3>
       <div className="grid gap-2 md:grid-cols-2">
         <input
           className="text-input"
           value={form.title}
-          onChange={(e) => setForm((s) => ({ ...s, title: e.target.value }))}
+          onChange={(event) => setForm((state) => ({ ...state, title: event.target.value }))}
           placeholder="Expense name"
         />
         <input
@@ -720,23 +852,23 @@ function ExpenseEditor({
           min="0"
           step="0.01"
           value={form.amount}
-          onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))}
+          onChange={(event) => setForm((state) => ({ ...state, amount: event.target.value }))}
           placeholder="Price"
         />
         <select
           className="text-input"
           value={form.category}
-          onChange={(e) =>
-            setForm((s) => ({
-              ...s,
-              category: e.target.value as ExpenseCategory,
-              subCategory: e.target.value === 'maintenance' ? s.subCategory : '',
+          onChange={(event) =>
+            setForm((state) => ({
+              ...state,
+              category: event.target.value as ExpenseCategory,
+              subCategory: event.target.value === 'maintenance' ? state.subCategory : '',
             }))
           }
         >
-          {EXPENSE_CATEGORIES.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
+          {EXPENSE_CATEGORIES.map((category) => (
+            <option key={category.value} value={category.value}>
+              {category.label}
             </option>
           ))}
         </select>
@@ -744,12 +876,12 @@ function ExpenseEditor({
           <select
             className="text-input"
             value={form.subCategory}
-            onChange={(e) => setForm((s) => ({ ...s, subCategory: e.target.value }))}
+            onChange={(event) => setForm((state) => ({ ...state, subCategory: event.target.value }))}
           >
             <option value="">Subcategory (optional)</option>
-            {MAINTENANCE_SUBCATEGORIES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
+            {MAINTENANCE_SUBCATEGORIES.map((category) => (
+              <option key={category.value} value={category.value}>
+                {category.label}
               </option>
             ))}
           </select>
@@ -759,11 +891,11 @@ function ExpenseEditor({
             <select
               className="text-input"
               value={form.frequency}
-              onChange={(e) =>
-                setForm((s) => ({
-                  ...s,
+              onChange={(event) =>
+                setForm((state) => ({
+                  ...state,
                   mode: 'repetitive',
-                  frequency: e.target.value as '' | ExpenseCadence,
+                  frequency: event.target.value as '' | ExpenseCadence,
                 }))
               }
             >
@@ -774,12 +906,11 @@ function ExpenseEditor({
                 </option>
               ))}
             </select>
-
             {form.frequency === 'custom' ? (
               <input
                 className="text-input"
                 value={form.customFrequency}
-                onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
+                onChange={(event) => setForm((state) => ({ ...state, customFrequency: event.target.value }))}
                 placeholder="Custom frequency (for example: every 45 days)"
                 list={`custom-frequency-${bucket}`}
               />
@@ -797,16 +928,13 @@ function ExpenseEditor({
       </button>
 
       <h3 className="mb-2 mt-5 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">expense_list</h3>
-
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Filter</span>
         {filter.kind === 'predicted' ? (
           <select
             className="text-input"
             value={filter.cadence}
-            onChange={(e) =>
-              setFilter({ kind: 'predicted', cadence: e.target.value as ExpenseCadence | 'all' })
-            }
+            onChange={(event) => setFilter({ kind: 'predicted', cadence: event.target.value as ExpenseCadence | 'all' })}
           >
             <option value="all">All frequencies</option>
             {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
@@ -820,10 +948,10 @@ function ExpenseEditor({
             <select
               className="text-input"
               value={filter.period}
-              onChange={(e) =>
+              onChange={(event) =>
                 setFilter({
                   kind: 'actual',
-                  period: e.target.value as FilterPeriod,
+                  period: event.target.value as FilterPeriod,
                   reference: filter.reference,
                 })
               }
@@ -839,9 +967,7 @@ function ExpenseEditor({
                 type="date"
                 className="text-input"
                 value={filter.reference}
-                onChange={(e) =>
-                  setFilter({ kind: 'actual', period: filter.period, reference: e.target.value })
-                }
+                onChange={(event) => setFilter({ kind: 'actual', period: filter.period, reference: event.target.value })}
               />
             )}
           </>
@@ -859,7 +985,12 @@ function ExpenseEditor({
         onCancelEdit={onCancelEdit}
         onSaveEdit={onSaveEdit}
         onRemove={onRemoveExpense}
-        onMove={onMoveExpense}
+        draggedExpenseId={draggedExpenseId}
+        dragOverCategory={dragOverCategory}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onDragEnterCategory={onDragEnterCategory}
+        onDropCategory={onDropCategory}
       />
 
       <datalist id={`custom-frequency-${bucket}`}>
@@ -886,14 +1017,13 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [actualFilter, setActualFilter] = useState<FilterState>(createActualFilter);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
   const [importStatus, setImportStatus] = useState<string | null>(null);
-  const predictedExpenses = useMemo(
-    () => state.expenses.filter((entry) => entry.bucket === 'predicted'),
-    [state.expenses],
-  );
-  const actualExpenses = useMemo(
-    () => state.expenses.filter((entry) => entry.bucket !== 'predicted'),
-    [state.expenses],
-  );
+  const [draggedExpenseId, setDraggedExpenseId] = useState<string | null>(null);
+  const [dragOverCategory, setDragOverCategory] = useState<ExpenseCategory | null>(null);
+  const [clearDialog, setClearDialog] = useState<ClearDialogState>(null);
+  const [clearInput, setClearInput] = useState('');
+
+  const predictedExpenses = useMemo(() => state.expenses.filter((entry) => entry.bucket === 'predicted'), [state.expenses]);
+  const actualExpenses = useMemo(() => state.expenses.filter((entry) => entry.bucket !== 'predicted'), [state.expenses]);
 
   const customFrequencyOptions = useMemo(() => {
     const values = new Set<string>();
@@ -910,7 +1040,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     startTransition(() => {
       mutateFinance(payload)
         .then((next) => setState(next))
-        .catch((e) => setError((e as Error).message));
+        .catch((nextError) => setError((nextError as Error).message));
     });
   }
 
@@ -924,8 +1054,9 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     setEditingExpenseForm(null);
   }
 
-  function moveExpense(expenseId: string, category: ExpenseCategory) {
-    runMutation({ op: 'move_expense', expenseId, category });
+  function requestClear(bucket: ExpenseBucket, label: string) {
+    setClearInput('');
+    setClearDialog({ bucket, label, challenge: randomChallenge() });
   }
 
   function addExpense(bucket: ExpenseBucket, form: ExpenseFormState, setForm: Dispatch<SetStateAction<ExpenseFormState>>) {
@@ -950,12 +1081,9 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       return;
     }
 
-    const cadence: ExpenseCadence =
-      bucket === 'actual' ? 'one-time' : (form.frequency as ExpenseCadence);
+    const cadence: ExpenseCadence = bucket === 'actual' ? 'one-time' : (form.frequency as ExpenseCadence);
     const notes = cadence === 'custom' ? `${CUSTOM_FREQ_PREFIX}${form.customFrequency.trim()}` : undefined;
-
-    const subCategory =
-      form.category === 'maintenance' && form.subCategory ? form.subCategory : undefined;
+    const subCategory = form.category === 'maintenance' && form.subCategory ? form.subCategory : undefined;
 
     runMutation({
       op: 'add_expense',
@@ -1001,11 +1129,9 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       return;
     }
 
-    const cadence: ExpenseCadence =
-      existing.bucket === 'actual' ? 'one-time' : (form.frequency as ExpenseCadence);
+    const cadence: ExpenseCadence = existing.bucket === 'actual' ? 'one-time' : (form.frequency as ExpenseCadence);
     const notes = cadence === 'custom' ? `${CUSTOM_FREQ_PREFIX}${form.customFrequency.trim()}` : undefined;
-    const subCategory =
-      form.category === 'maintenance' && form.subCategory ? form.subCategory : undefined;
+    const subCategory = form.category === 'maintenance' && form.subCategory ? form.subCategory : undefined;
 
     runMutation({
       op: 'edit_expense',
@@ -1018,14 +1144,46 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       frequency: cadence,
       spentOn: existing.spentOn,
       notes,
+      imageUrl: existing.imageUrl,
     });
 
     stopEditingExpense();
   }
 
+  function moveExpense(expenseId: string, category: ExpenseCategory) {
+    runMutation({ op: 'move_expense', expenseId, category });
+  }
+
+  function handleDropCategory(category: ExpenseCategory) {
+    if (!draggedExpenseId) return;
+    moveExpense(draggedExpenseId, category);
+    setDraggedExpenseId(null);
+    setDragOverCategory(null);
+  }
+
   return (
     <div className="space-y-6">
+      {clearDialog && (
+        <ClearExpenseDialog
+          dialog={clearDialog}
+          value={clearInput}
+          setValue={setClearInput}
+          onCancel={() => {
+            setClearDialog(null);
+            setClearInput('');
+          }}
+          onConfirm={() => {
+            runMutation({ op: 'clear_expenses', bucket: clearDialog.bucket });
+            setClearDialog(null);
+            setClearInput('');
+          }}
+          isPending={isPending}
+        />
+      )}
+
       {error && <p className="rounded-xl border-2 border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</p>}
+
+      {mode === 'dashboard' && <SummaryCards summary={summary} />}
 
       {mode === 'dashboard' && (
         <>
@@ -1046,9 +1204,18 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             onCancelEdit={stopEditingExpense}
             onSaveEdit={saveEditedExpense}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
-            onMoveExpense={moveExpense}
+            onRequestClear={() => requestClear('predicted', 'Predicted Expenses')}
             filter={predictedFilter}
             setFilter={setPredictedFilter}
+            draggedExpenseId={draggedExpenseId}
+            dragOverCategory={dragOverCategory}
+            onDragStart={(item) => setDraggedExpenseId(item.id)}
+            onDragEnd={() => {
+              setDraggedExpenseId(null);
+              setDragOverCategory(null);
+            }}
+            onDragEnterCategory={setDragOverCategory}
+            onDropCategory={handleDropCategory}
           />
           <ExpenseEditor
             bucket="actual"
@@ -1067,7 +1234,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             onCancelEdit={stopEditingExpense}
             onSaveEdit={saveEditedExpense}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
-            onMoveExpense={moveExpense}
+            onRequestClear={() => requestClear('actual', 'Actual Expenses')}
             filter={actualFilter}
             setFilter={setActualFilter}
             headerAction={
@@ -1075,13 +1242,25 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
                 isPending={isPending}
                 status={importStatus}
                 onParsed={(expenses) => {
-                  if (expenses.length === 0) { setImportStatus('No valid expenses found.'); return; }
+                  if (expenses.length === 0) {
+                    setImportStatus('No valid expenses found.');
+                    return;
+                  }
                   setImportStatus(null);
                   runMutation({ op: 'bulk_add_expenses', expenses });
                   setImportStatus(`${expenses.length} imported`);
                 }}
               />
             }
+            draggedExpenseId={draggedExpenseId}
+            dragOverCategory={dragOverCategory}
+            onDragStart={(item) => setDraggedExpenseId(item.id)}
+            onDragEnd={() => {
+              setDraggedExpenseId(null);
+              setDragOverCategory(null);
+            }}
+            onDragEnterCategory={setDragOverCategory}
+            onDropCategory={handleDropCategory}
           />
         </>
       )}
@@ -1091,19 +1270,19 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
           <section className="card-panel">
             <h2 className="section-title">Add to buy-list</h2>
             <p className="mb-2 text-sm font-semibold text-duored-muted">
-              Paste only the product link. Name, price, and source platform are extracted automatically.
+              Paste only the product link. Name, price, source platform, and product image are extracted automatically.
             </p>
             <div className="grid gap-2 md:grid-cols-2">
               <input
                 className="text-input md:col-span-2"
                 value={buyForm.url}
-                onChange={(e) => setBuyForm((s) => ({ ...s, url: e.target.value }))}
+                onChange={(event) => setBuyForm((state) => ({ ...state, url: event.target.value }))}
                 placeholder="Paste product link from Amazon / Flipkart / Myntra / etc."
               />
               <input
                 className="text-input md:col-span-2"
                 value={buyForm.notes}
-                onChange={(e) => setBuyForm((s) => ({ ...s, notes: e.target.value }))}
+                onChange={(event) => setBuyForm((state) => ({ ...state, notes: event.target.value }))}
                 placeholder="Optional note"
               />
             </div>
@@ -1142,6 +1321,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
                     affordable={affordableSet.has(item.id)}
                     onMove={(itemId, direction) => runMutation({ op: 'move_buy_item', itemId, direction })}
                     onRemove={(itemId) => runMutation({ op: 'remove_buy_item', itemId })}
+                    onBought={(itemId) => runMutation({ op: 'mark_buy_item_bought', itemId, category: 'maintenance' })}
                   />
                 ))}
               </ol>

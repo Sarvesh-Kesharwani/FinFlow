@@ -53,10 +53,21 @@ function canAffordThisMonth(sortedByPriority: BuyListItem[], budget: number): st
   return affordable;
 }
 
+function isCurrentYear(isoDate: string): boolean {
+  const date = new Date(isoDate);
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear();
+}
+
 export function summarizeFinance(store: FinanceStore): FinanceSummary {
   const monthlyIncome = clampMoney(toNumber(store.monthlyIncome));
   const predictedExpenses = store.expenses.filter((expense) => expense.bucket === 'predicted');
   const actualExpenses = store.expenses.filter((expense) => expense.bucket !== 'predicted');
+  const avgMonthlyExpense = clampMoney(
+    store.expenses
+      .filter((expense) => expense.cadence !== 'one-time' && isCurrentYear(expense.spentOn))
+      .reduce((sum, expense) => sum + clampMoney(toNumber(expense.amount)), 0) / 12,
+  );
   const monthlyExpectedExpenses = clampMoney(
     predictedExpenses.reduce((sum, expense) => sum + expectedContribution(expense), 0),
   );
@@ -70,6 +81,7 @@ export function summarizeFinance(store: FinanceStore): FinanceSummary {
     monthlyExpectedExpenses,
     currentMonthSpent,
     currentMonthRemaining,
+    avgMonthlyExpense,
     canBuyCountThisMonth: affordableItemIds.length,
     affordableItemIds,
   };

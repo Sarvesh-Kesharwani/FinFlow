@@ -3,6 +3,7 @@ export interface ProductDetails {
   price: number;
   currency: string;
   sourcePlatform: string;
+  imageUrl: string;
 }
 
 function cleanText(value: string): string {
@@ -140,6 +141,7 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
   let title = titleFromUrl(parsedUrl);
   let price = 0;
   let currency = 'INR';
+  let imageUrl = '';
 
   try {
     const response = await fetch(url, {
@@ -159,6 +161,7 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
 
       const ogTitle = getMetaValue(metas, ['og:title', 'twitter:title']);
       if (ogTitle) title = cleanText(ogTitle);
+      imageUrl = getMetaValue(metas, ['og:image', 'twitter:image', 'image']);
 
       if (!ogTitle) {
         const domTitle =
@@ -228,5 +231,6 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
     price,
     currency: currency || 'INR',
     sourcePlatform,
+    imageUrl,
   };
 }

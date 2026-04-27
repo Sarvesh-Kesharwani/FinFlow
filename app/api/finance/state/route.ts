@@ -8,7 +8,15 @@ import {
 import { readDriveFinanceStore, writeDriveFinanceStore } from '@/lib/finance-drive';
 import { getSession } from '@/lib/session';
 import { normalizeMoney } from '@/lib/finance-math';
-import type { BuyListItem, ExpenseBucket, ExpenseCadence, ExpenseCategory, ExpenseEntry, FinanceStore } from '@/lib/finance-types';
+import type {
+  BuyListItem,
+  ExpenseBucket,
+  ExpenseCadence,
+  ExpenseCategory,
+  ExpenseEntry,
+  FeatureRequestEntry,
+  FinanceStore,
+} from '@/lib/finance-types';
 import { extractProductDetails } from '@/lib/product-extractor';
 
 function fail(message: string, status = 400) {
@@ -70,6 +78,11 @@ function toTitleCase(value: string): string {
   return parts.map((part) => part[0].toUpperCase() + part.slice(1)).join(' ');
 }
 
+function sanitizeImageUrl(value: unknown): string | undefined {
+  const out = String(value ?? '').trim().slice(0, 1000);
+  return out || undefined;
+}
+
 async function loadAuthoritativeState(): Promise<{ state: FinanceStore; accessToken: string | null }> {
   const cookieStore = await getCookieFinanceStore();
   const session = await getSession();
@@ -80,7 +93,12 @@ async function loadAuthoritativeState(): Promise<{ state: FinanceStore; accessTo
     const drive = await readDriveFinanceStore(accessToken);
     if (drive) {
       return {
-        state: { monthlyIncome: drive.monthlyIncome, expenses: drive.expenses, buyList: drive.buyList },
+        state: {
+          monthlyIncome: drive.monthlyIncome,
+          expenses: drive.expenses,
+          buyList: drive.buyList,
+          requests: drive.requests,
+        },
         accessToken,
       };
     }
@@ -149,6 +167,7 @@ export async function POST(req: Request) {
       cadence: normalizeCadence(String(body.frequency ?? body.cadence ?? 'one-time')),
       spentOn: new Date(String(body.spentOn ?? new Date().toISOString())).toISOString(),
       notes: String(body.notes ?? '').trim() || undefined,
+      imageUrl: sanitizeImageUrl(body.imageUrl),
     };
 
     return persist({ ...state, expenses: [entry, ...state.expenses] }, accessToken);
@@ -160,6 +179,20 @@ export async function POST(req: Request) {
       {
         ...state,
         expenses: state.expenses.filter((entry) => entry.id !== expenseId),
+      },
+      accessToken,
+    );
+  }
+
+  if (op === 'clear_expenses') {
+    const bucket = String(body.bucket ?? '').trim().toLowerCase();
+    const nextExpenses = bucket === 'predicted' || bucket === 'actual'
+      ? state.expenses.filter((entry) => entry.bucket !== bucket)
+      : [];
+    return persist(
+      {
+        ...state,
+        expenses: nextExpenses,
       },
       accessToken,
     );
@@ -177,6 +210,7 @@ export async function POST(req: Request) {
       ...existing,
       category,
       subCategory: category === 'maintenance' ? existing.subCategory : undefined,
+      imageUrl: existing.imageUrl,
     };
 
     return persist(
@@ -220,6 +254,7 @@ export async function POST(req: Request) {
       cadence: bucket === 'actual' ? 'one-time' : cadence,
       spentOn: new Date(String(body.spentOn ?? existing.spentOn)).toISOString(),
       notes: String(body.notes ?? '').trim() || undefined,
+      imageUrl: sanitizeImageUrl(body.imageUrl) ?? existing.imageUrl,
     };
 
     return persist(
@@ -256,6 +291,7 @@ export async function POST(req: Request) {
         cadence: 'one-time',
         spentOn,
         notes: String(r.notes ?? '').trim() || undefined,
+        imageUrl: sanitizeImageUrl(r.imageUrl),
       });
     }
 
@@ -291,8 +327,45 @@ export async function POST(req: Request) {
       currency,
       notes: String(body.notes ?? '').trim() || undefined,
       createdAt: new Date().toISOString(),
+      imageUrl: sanitizeImageUrl(body.imageUrl) ?? extracted.imageUrl,
     };
     return persist({ ...state, buyList: [...state.buyList, item] }, accessToken);
+  }
+
+  if (op === 'mark_buy_item_bought') {
+    const itemId = String(body.itemId ?? '').trim();
+    const item = state.buyList.find((entry) => entry.id === itemId);
+    if (!item) return fail('Item not found', 404);
+
+    const notes = [
+      item.notes?.trim(),
+      item.sourcePlatform ? `Bought via ${item.sourcePlatform}` : '',
+      item.url ? `Source: ${item.url}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const expense: ExpenseEntry = {
+      id: id(),
+      title: toTitleCase(item.title),
+      amount: normalizeMoney(item.price),
+      bucket: 'actual',
+      category: normalizeExpenseCategory(String(body.category ?? 'maintenance')),
+      subCategory: normalizeSubCategory(normalizeExpenseCategory(String(body.category ?? 'maintenance')), body.subCategory),
+      cadence: 'one-time',
+      spentOn: new Date().toISOString(),
+      notes: notes || undefined,
+      imageUrl: item.imageUrl,
+    };
+
+    return persist(
+      {
+        ...state,
+        expenses: [expense, ...state.expenses],
+        buyList: state.buyList.filter((entry) => entry.id !== itemId),
+      },
+      accessToken,
+    );
   }
 
   if (op === 'remove_buy_item') {
@@ -321,6 +394,36 @@ export async function POST(req: Request) {
       {
         ...state,
         buyList: moveItem(state.buyList, index, target),
+      },
+      accessToken,
+    );
+  }
+
+  if (op === 'add_request') {
+    const description = String(body.description ?? '').trim().slice(0, 500);
+    if (!description) return fail('Request description is required');
+
+    const request: FeatureRequestEntry = {
+      id: id(),
+      description,
+      createdAt: new Date().toISOString(),
+    };
+
+    return persist(
+      {
+        ...state,
+        requests: [request, ...state.requests],
+      },
+      accessToken,
+    );
+  }
+
+  if (op === 'remove_request') {
+    const requestId = String(body.requestId ?? '').trim();
+    return persist(
+      {
+        ...state,
+        requests: state.requests.filter((entry) => entry.id !== requestId),
       },
       accessToken,
     );

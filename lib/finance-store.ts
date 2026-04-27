@@ -1,5 +1,11 @@
 import { cookies } from 'next/headers';
-import { DEFAULT_FINANCE_STORE, type BuyListItem, type ExpenseEntry, type FinanceStore } from './finance-types';
+import {
+  DEFAULT_FINANCE_STORE,
+  type BuyListItem,
+  type ExpenseEntry,
+  type FeatureRequestEntry,
+  type FinanceStore,
+} from './finance-types';
 import { normalizeMoney } from './finance-math';
 
 const COOKIE = 'finance_manager_state';
@@ -54,6 +60,7 @@ function normalizeExpense(entry: Partial<ExpenseEntry>): ExpenseEntry | null {
     cadence,
     spentOn: new Date(spentOn).toISOString(),
     notes: String(entry.notes ?? '').trim().slice(0, 240) || undefined,
+    imageUrl: String(entry.imageUrl ?? '').trim().slice(0, 1000) || undefined,
   };
 }
 
@@ -73,6 +80,19 @@ function normalizeBuyListItem(item: Partial<BuyListItem>): BuyListItem | null {
     currency: String(item.currency ?? '').trim().toUpperCase() || undefined,
     notes: String(item.notes ?? '').trim().slice(0, 240) || undefined,
     createdAt: new Date(String(item.createdAt ?? new Date().toISOString())).toISOString(),
+    imageUrl: String(item.imageUrl ?? '').trim().slice(0, 1000) || undefined,
+  };
+}
+
+function normalizeRequest(item: Partial<FeatureRequestEntry>): FeatureRequestEntry | null {
+  const id = cleanId(String(item.id ?? ''));
+  const description = String(item.description ?? '').trim().slice(0, 500);
+  if (!id || !description) return null;
+
+  return {
+    id,
+    description,
+    createdAt: new Date(String(item.createdAt ?? new Date().toISOString())).toISOString(),
   };
 }
 
@@ -87,11 +107,17 @@ export function normalizeFinanceStore(store: Partial<FinanceStore> | null | unde
       .map((item) => normalizeBuyListItem(item))
       .filter((item): item is BuyListItem => !!item),
   );
+  const normalizedRequests = uniqueById(
+    (store?.requests ?? [])
+      .map((item) => normalizeRequest(item))
+      .filter((item): item is FeatureRequestEntry => !!item),
+  );
 
   return {
     monthlyIncome: normalizeMoney(store?.monthlyIncome),
     expenses: normalizedExpenses,
     buyList: normalizedBuyList,
+    requests: normalizedRequests,
   };
 }
 
