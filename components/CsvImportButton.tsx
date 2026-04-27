@@ -28,20 +28,57 @@ function mapCategory(_csvCategory: string, _place: string): ExpenseCategory {
   return 'maintenance';
 }
 
+function parseCsvLine(line: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function buildExpenseNotes(place: string, note: string): string | undefined {
+  const segments: string[] = [];
+  if (place) segments.push(`Place: ${toTitleCase(place)}`);
+  if (note && note !== '-' && note !== "'-") segments.push(`Note: ${note}`);
+  return segments.length > 0 ? segments.join(' | ') : undefined;
+}
+
 function parseAxioCsv(text: string): ParsedExpense[] {
   const lines = text.split('\n');
-  const dataStart = lines.findIndex((l) => l.startsWith('"DATE"'));
+  const dataStart = lines.findIndex((l) => l.trim().startsWith('DATE') || l.trim().startsWith('"DATE"'));
   if (dataStart === -1) return [];
 
   const results: ParsedExpense[] = [];
   for (let i = dataStart + 1; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (!line || line.startsWith('"",""')) continue;
+    if (!line) continue;
 
-    const cols = line.split('","').map((c) => c.replace(/^"|"$/g, '').trim());
+    const cols = parseCsvLine(line);
     if (cols.length < 9) continue;
 
-    const [date, , place, amountRaw, drCr, , expense, , category, , note] = cols;
+    const [date, , place, amountRaw, drCr, , expense, , rawCategory, , note] = cols;
 
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
     if (drCr !== 'DR') continue;
@@ -51,12 +88,14 @@ function parseAxioCsv(text: string): ParsedExpense[] {
     const amount = parseAmount(amountRaw);
     if (amount <= 0) continue;
 
+    const expenseName = toTitleCase(rawCategory || 'Unknown');
+
     results.push({
-      title: toTitleCase(place),
+      title: expenseName,
       amount,
-      category: mapCategory(category, place),
+      category: mapCategory(rawCategory, place),
       spentOn: date,
-      notes: note && note !== '-' && note !== "'-" ? note : undefined,
+      notes: buildExpenseNotes(place, note),
     });
   }
   return results;

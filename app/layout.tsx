@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-dvh">
         <div className="bg-orbs" aria-hidden />
         <header className="sticky top-0 z-10 border-b-2 border-duored-border/70 bg-white/85 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <div className="mx-auto flex w-full max-w-[96rem] items-center justify-between gap-4 px-4 py-3">
             <Link href="/" className="flex items-center gap-2 text-xl font-extrabold text-duored-deep">
               <span aria-hidden>🐲</span>
               <span>FinFlow</span>
@@ -43,7 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+        <main className="mx-auto w-full max-w-[96rem] px-4 py-6">{children}</main>
       </body>
     </html>
   );

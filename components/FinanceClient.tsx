@@ -154,6 +154,17 @@ function formatExpenseTitle(title: string): string {
     .join(' ');
 }
 
+function getFrequencyLabel(item: ExpenseEntry): string {
+  const customFrequency = parseCustomFrequency(item.notes);
+  return item.cadence === 'custom' && customFrequency ? `Custom (${customFrequency})` : item.cadence;
+}
+
+function getVisibleExpenseNotes(item: ExpenseEntry): string | null {
+  if (!item.notes) return null;
+  if (item.notes.toLowerCase().startsWith(CUSTOM_FREQ_PREFIX)) return null;
+  return item.notes;
+}
+
 type FinanceOp =
   | {
       op: 'add_expense';
@@ -181,6 +192,7 @@ type FinanceOp =
       notes?: string;
     }
   | { op: 'remove_expense'; expenseId: string }
+  | { op: 'move_expense'; expenseId: string; category: ExpenseCategory }
   | { op: 'bulk_add_expenses'; expenses: unknown[] }
   | { op: 'add_buy_item'; url: string; notes?: string }
   | { op: 'remove_buy_item'; itemId: string }
@@ -204,34 +216,50 @@ function ExpenseRow({
   item,
   onRemove,
   onEdit,
+  onMove,
   showFrequency,
 }: {
   item: ExpenseEntry;
   onRemove: (id: string) => void;
   onEdit: (item: ExpenseEntry) => void;
+  onMove: (id: string, category: ExpenseCategory) => void;
   showFrequency: boolean;
 }) {
-  const customFrequency = parseCustomFrequency(item.notes);
-  const frequencyLabel =
-    item.cadence === 'custom' && customFrequency ? `Custom (${customFrequency})` : item.cadence;
+  const frequencyLabel = getFrequencyLabel(item);
+  const visibleNotes = getVisibleExpenseNotes(item);
 
   return (
-    <li className="lift-card">
-      <div className="min-w-0">
-        <p className="truncate font-extrabold text-duored-ink">{formatExpenseTitle(item.title)}</p>
+    <li className="lift-card flex-col items-start sm:flex-row">
+      <div className="min-w-0 flex-1">
+        <p className="font-extrabold text-duored-ink">{formatExpenseTitle(item.title)}</p>
         <div className="text-xs text-duored-muted">
           {showFrequency && <p>Freq: {frequencyLabel}</p>}
           <p>{new Date(item.spentOn).toLocaleDateString()}</p>
           <p>
             {categoryLabel(item.category)}
             {item.category === 'maintenance' && item.subCategory
-              ? ` › ${subCategoryLabel(item.subCategory)}`
+              ? ` > ${subCategoryLabel(item.subCategory)}`
               : ''}
           </p>
+          {visibleNotes && <p className="mt-1 break-words">{visibleNotes}</p>}
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
         <p className="font-extrabold text-duored-deep">{formatMoney(item.amount)}</p>
+        <select
+          className="text-input min-w-[8.5rem] py-1 text-sm"
+          value={item.category}
+          onChange={(e) => {
+            const nextCategory = e.target.value as ExpenseCategory;
+            if (nextCategory !== item.category) onMove(item.id, nextCategory);
+          }}
+        >
+          {EXPENSE_CATEGORIES.map((category) => (
+            <option key={`${item.id}-${category.value}`} value={category.value}>
+              Move to {category.label}
+            </option>
+          ))}
+        </select>
         <button className="chip-soft" onClick={() => onEdit(item)} type="button">
           Edit
         </button>
@@ -295,6 +323,7 @@ function ExpenseGroupedList({
   onCancelEdit,
   onSaveEdit,
   onRemove,
+  onMove,
 }: {
   expenses: ExpenseEntry[];
   filter: FilterState;
@@ -306,6 +335,7 @@ function ExpenseGroupedList({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
+  onMove: (id: string, category: ExpenseCategory) => void;
 }) {
   const filtered = useMemo(
     () => expenses.filter((e) => matchesFilter(e, filter)),
@@ -320,8 +350,7 @@ function ExpenseGroupedList({
       else byCategory.set(entry.category, [entry]);
     }
     const order: ExpenseCategory[] = EXPENSE_CATEGORIES.map((c) => c.value);
-    return order
-      .map((cat) => ({ category: cat, items: byCategory.get(cat) ?? [] }))
+    return order.map((cat) => ({ category: cat, items: byCategory.get(cat) ?? [] }));
   }, [filtered]);
 
   function renderCategoryBlock(category: ExpenseCategory, items: ExpenseEntry[]) {
@@ -361,6 +390,7 @@ function ExpenseGroupedList({
             onCancelEdit={onCancelEdit}
             onSaveEdit={onSaveEdit}
             onRemove={onRemove}
+            onMove={onMove}
           />
         ) : (
           <ul className="space-y-2">
@@ -376,6 +406,7 @@ function ExpenseGroupedList({
                 onCancelEdit={onCancelEdit}
                 onSaveEdit={onSaveEdit}
                 onRemove={onRemove}
+                onMove={onMove}
               />
             ))}
           </ul>
@@ -390,7 +421,7 @@ function ExpenseGroupedList({
 
   if (filter.kind === 'actual') {
     return (
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         {grouped.map(({ category, items }) => renderCategoryBlock(category, items))}
       </div>
     );
@@ -413,6 +444,7 @@ function MaintenanceSubGroups({
   onCancelEdit,
   onSaveEdit,
   onRemove,
+  onMove,
 }: {
   items: ExpenseEntry[];
   showFrequency: boolean;
@@ -423,6 +455,7 @@ function MaintenanceSubGroups({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
+  onMove: (id: string, category: ExpenseCategory) => void;
 }) {
   const buckets = useMemo(() => {
     const map = new Map<string, ExpenseEntry[]>();
@@ -447,7 +480,7 @@ function MaintenanceSubGroups({
       {buckets.map((bucket) => (
         <div key={bucket.key} className="space-y-2">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">
-            ↳ {bucket.label} ({bucket.items.length})
+            - {bucket.label} ({bucket.items.length})
           </p>
           <ul className="space-y-2">
             {bucket.items.map((entry) => (
@@ -462,6 +495,7 @@ function MaintenanceSubGroups({
                 onCancelEdit={onCancelEdit}
                 onSaveEdit={onSaveEdit}
                 onRemove={onRemove}
+                onMove={onMove}
               />
             ))}
           </ul>
@@ -481,6 +515,7 @@ function ExpenseListItem({
   onCancelEdit,
   onSaveEdit,
   onRemove,
+  onMove,
 }: {
   item: ExpenseEntry;
   showFrequency: boolean;
@@ -491,6 +526,7 @@ function ExpenseListItem({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
+  onMove: (id: string, category: ExpenseCategory) => void;
 }) {
   if (isEditing && editForm) {
     return (
@@ -602,7 +638,15 @@ function ExpenseListItem({
     );
   }
 
-  return <ExpenseRow item={item} onEdit={onStartEdit} onRemove={onRemove} showFrequency={showFrequency} />;
+  return (
+    <ExpenseRow
+      item={item}
+      onEdit={onStartEdit}
+      onRemove={onRemove}
+      onMove={onMove}
+      showFrequency={showFrequency}
+    />
+  );
 }
 
 function ExpenseEditor({
@@ -622,6 +666,7 @@ function ExpenseEditor({
   onCancelEdit,
   onSaveEdit,
   onRemoveExpense,
+  onMoveExpense,
   filter,
   setFilter,
   headerAction,
@@ -642,6 +687,7 @@ function ExpenseEditor({
   onCancelEdit: () => void;
   onSaveEdit: (expenseId: string) => void;
   onRemoveExpense: (expenseId: string) => void;
+  onMoveExpense: (expenseId: string, category: ExpenseCategory) => void;
   filter: FilterState;
   setFilter: Dispatch<SetStateAction<FilterState>>;
   headerAction?: ReactNode;
@@ -649,7 +695,7 @@ function ExpenseEditor({
   const supportsFrequency = bucket === 'predicted';
 
   return (
-    <section className="card-panel">
+    <section className="card-panel w-full">
       <div className="flex items-center gap-2">
         <h2 className="section-title">{title}</h2>
         {infoText && (
@@ -813,6 +859,7 @@ function ExpenseEditor({
         onCancelEdit={onCancelEdit}
         onSaveEdit={onSaveEdit}
         onRemove={onRemoveExpense}
+        onMove={onMoveExpense}
       />
 
       <datalist id={`custom-frequency-${bucket}`}>
@@ -875,6 +922,10 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   function stopEditingExpense() {
     setEditingExpenseId(null);
     setEditingExpenseForm(null);
+  }
+
+  function moveExpense(expenseId: string, category: ExpenseCategory) {
+    runMutation({ op: 'move_expense', expenseId, category });
   }
 
   function addExpense(bucket: ExpenseBucket, form: ExpenseFormState, setForm: Dispatch<SetStateAction<ExpenseFormState>>) {
@@ -995,6 +1046,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             onCancelEdit={stopEditingExpense}
             onSaveEdit={saveEditedExpense}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
+            onMoveExpense={moveExpense}
             filter={predictedFilter}
             setFilter={setPredictedFilter}
           />
@@ -1015,6 +1067,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             onCancelEdit={stopEditingExpense}
             onSaveEdit={saveEditedExpense}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
+            onMoveExpense={moveExpense}
             filter={actualFilter}
             setFilter={setActualFilter}
             headerAction={

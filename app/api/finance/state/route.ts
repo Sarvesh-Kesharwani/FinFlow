@@ -165,6 +165,29 @@ export async function POST(req: Request) {
     );
   }
 
+  if (op === 'move_expense') {
+    const expenseId = String(body.expenseId ?? '').trim();
+    if (!expenseId) return fail('Expense id is required');
+
+    const existing = state.expenses.find((entry) => entry.id === expenseId);
+    if (!existing) return fail('Expense not found', 404);
+
+    const category = normalizeExpenseCategory(String(body.category ?? existing.category));
+    const updatedEntry: ExpenseEntry = {
+      ...existing,
+      category,
+      subCategory: category === 'maintenance' ? existing.subCategory : undefined,
+    };
+
+    return persist(
+      {
+        ...state,
+        expenses: state.expenses.map((entry) => (entry.id === expenseId ? updatedEntry : entry)),
+      },
+      accessToken,
+    );
+  }
+
   if (op === 'edit_expense') {
     const expenseId = String(body.expenseId ?? '').trim();
     if (!expenseId) return fail('Expense id is required');
