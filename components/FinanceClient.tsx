@@ -446,53 +446,37 @@ function ExpenseEditor({
         )}
         {supportsFrequency && (
           <>
-            <div className="flex items-center gap-2 rounded-xl border-2 border-duored-soft bg-white/80 px-3 py-2 md:col-span-2">
-              <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Type</span>
-              <button
-                type="button"
-                className={form.mode === 'one-time' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
-                onClick={() => setForm((s) => ({ ...s, mode: 'one-time', frequency: '', customFrequency: '' }))}
-              >
-                One-timer
-              </button>
-              <button
-                type="button"
-                className={form.mode === 'repetitive' ? 'chip-soft border-duored-link text-duored-link' : 'chip-soft'}
-                onClick={() => setForm((s) => ({ ...s, mode: 'repetitive', frequency: s.frequency || 'monthly' }))}
-              >
-                Repetitive
-              </button>
-            </div>
+            <select
+              className="text-input"
+              value={form.frequency}
+              onChange={(e) =>
+                setForm((s) => ({
+                  ...s,
+                  mode: 'repetitive',
+                  frequency: e.target.value as '' | ExpenseCadence,
+                }))
+              }
+            >
+              <option value="">Frequency of purchase</option>
+              {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
 
-            {form.mode === 'repetitive' && (
-              <>
-                <select
-                  className="text-input"
-                  value={form.frequency}
-                  onChange={(e) => setForm((s) => ({ ...s, frequency: e.target.value as '' | ExpenseCadence }))}
-                >
-                  <option value="">Frequency of purchase</option>
-                  {EXPENSE_CADENCE_OPTIONS.filter((item) => item.value !== 'one-time').map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-
-                {form.frequency === 'custom' ? (
-                  <input
-                    className="text-input"
-                    value={form.customFrequency}
-                    onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
-                    placeholder="Custom frequency (for example: every 45 days)"
-                    list={`custom-frequency-${bucket}`}
-                  />
-                ) : (
-                  <div className="text-xs font-semibold text-duored-muted">
-                    Frequency is reusable when you choose custom and save a label.
-                  </div>
-                )}
-              </>
+            {form.frequency === 'custom' ? (
+              <input
+                className="text-input"
+                value={form.customFrequency}
+                onChange={(e) => setForm((s) => ({ ...s, customFrequency: e.target.value }))}
+                placeholder="Custom frequency (for example: every 45 days)"
+                list={`custom-frequency-${bucket}`}
+              />
+            ) : (
+              <div className="text-xs font-semibold text-duored-muted">
+                Frequency is reusable when you choose custom and save a label.
+              </div>
             )}
           </>
         )}
@@ -596,18 +580,18 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       return;
     }
 
-    if (bucket === 'predicted' && form.mode === 'repetitive' && !form.frequency) {
-      setError('Select a frequency for repetitive expenses');
+    if (bucket === 'predicted' && !form.frequency) {
+      setError('Select a frequency for predicted expenses');
       return;
     }
 
-    if (bucket === 'predicted' && form.mode === 'repetitive' && form.frequency === 'custom' && !form.customFrequency.trim()) {
+    if (bucket === 'predicted' && form.frequency === 'custom' && !form.customFrequency.trim()) {
       setError('Add a custom frequency label so you can reuse it');
       return;
     }
 
     const cadence: ExpenseCadence =
-      bucket === 'actual' ? 'one-time' : form.mode === 'one-time' ? 'one-time' : (form.frequency as ExpenseCadence);
+      bucket === 'actual' ? 'one-time' : (form.frequency as ExpenseCadence);
     const notes = cadence === 'custom' ? `${CUSTOM_FREQ_PREFIX}${form.customFrequency.trim()}` : undefined;
 
     const subCategory =
