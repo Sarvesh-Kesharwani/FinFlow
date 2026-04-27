@@ -32,7 +32,22 @@ function normalizeExpense(entry: Partial<ExpenseEntry>): ExpenseEntry | null {
   const title = String(entry.title ?? '').trim().slice(0, 120);
   if (!id || !title) return null;
 
-  const category = String(entry.category ?? 'other') as ExpenseEntry['category'];
+  const allowedCategories = new Set<ExpenseEntry['category']>([
+    'purchases',
+    'services',
+    'investments',
+    'subscriptions',
+    'utilities',
+    'fuel',
+    'insurance',
+    'maintenance',
+    'savings',
+    'money+',
+    'other',
+  ]);
+  const rawCategory = String(entry.category ?? 'other').trim().toLowerCase() as ExpenseEntry['category'];
+  const category = allowedCategories.has(rawCategory) ? rawCategory : 'other';
+  const subCategory = String(entry.subCategory ?? '').trim().slice(0, 60) || undefined;
   const rawCadence = String(entry.cadence ?? 'one-time').trim().toLowerCase();
   const cadence = (
     ['one-time', 'daily', 'weekly', 'monthly', 'yearly', 'custom'].includes(rawCadence)
@@ -47,6 +62,7 @@ function normalizeExpense(entry: Partial<ExpenseEntry>): ExpenseEntry | null {
     amount: normalizeMoney(entry.amount),
     bucket: entry.bucket === 'predicted' ? 'predicted' : 'actual',
     category,
+    subCategory: category === 'maintenance' ? subCategory : undefined,
     cadence,
     spentOn: new Date(spentOn).toISOString(),
     notes: String(entry.notes ?? '').trim().slice(0, 240) || undefined,

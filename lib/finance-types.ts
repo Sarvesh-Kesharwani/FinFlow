@@ -7,7 +7,14 @@ export type ExpenseCategory =
   | 'fuel'
   | 'insurance'
   | 'maintenance'
+  | 'savings'
+  | 'money+'
   | 'other';
+
+export type MaintenanceSubcategory =
+  | 'productivity-now'
+  | 'fun-mentalHealth'
+  | 'physicalHealth';
 
 export type ExpenseCadence = 'one-time' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom';
 export type ExpenseBucket = 'predicted' | 'actual';
@@ -18,6 +25,7 @@ export interface ExpenseEntry {
   amount: number;
   bucket: ExpenseBucket;
   category: ExpenseCategory;
+  subCategory?: string;
   cadence: ExpenseCadence;
   spentOn: string; // ISO date
   notes?: string;
@@ -63,7 +71,15 @@ export const EXPENSE_CATEGORIES: Array<{ value: ExpenseCategory; label: string }
   { value: 'fuel', label: 'Fuel' },
   { value: 'insurance', label: 'Insurance' },
   { value: 'maintenance', label: 'Maintenance' },
+  { value: 'savings', label: 'Savings' },
+  { value: 'money+', label: 'Money+' },
   { value: 'other', label: 'Other' },
+];
+
+export const MAINTENANCE_SUBCATEGORIES: Array<{ value: MaintenanceSubcategory; label: string }> = [
+  { value: 'productivity-now', label: 'Productivity-Now' },
+  { value: 'fun-mentalHealth', label: 'Fun & Mental Health' },
+  { value: 'physicalHealth', label: 'Physical Health' },
 ];
 
 export const EXPENSE_CADENCE_OPTIONS: Array<{ value: ExpenseCadence; label: string }> = [

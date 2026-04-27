@@ -5,9 +5,12 @@ import { CsvImportButton } from '@/components/CsvImportButton';
 import { summarizeFinance } from '@/lib/finance-math';
 import {
   EXPENSE_CADENCE_OPTIONS,
+  EXPENSE_CATEGORIES,
+  MAINTENANCE_SUBCATEGORIES,
   type BuyListItem,
   type ExpenseBucket,
   type ExpenseCadence,
+  type ExpenseCategory,
   type ExpenseEntry,
   type FinanceStore,
 } from '@/lib/finance-types';
@@ -23,6 +26,8 @@ type ExpenseFormState = {
   mode: ExpenseFormMode;
   frequency: '' | ExpenseCadence;
   customFrequency: string;
+  category: ExpenseCategory;
+  subCategory: string;
 };
 
 function createExpenseForm(): ExpenseFormState {
@@ -32,7 +37,66 @@ function createExpenseForm(): ExpenseFormState {
     mode: 'one-time',
     frequency: '',
     customFrequency: '',
+    category: 'other',
+    subCategory: '',
   };
+}
+
+type FilterPeriod = 'all' | 'day' | 'week' | 'month' | 'year';
+
+type FilterState = {
+  period: FilterPeriod;
+  reference: string; // YYYY-MM-DD
+};
+
+function createFilter(): FilterState {
+  return { period: 'all', reference: new Date().toISOString().slice(0, 10) };
+}
+
+function startOfWeek(date: Date): Date {
+  const out = new Date(date);
+  const day = out.getDay(); // 0 = Sunday
+  const diff = (day + 6) % 7; // Monday-based
+  out.setHours(0, 0, 0, 0);
+  out.setDate(out.getDate() - diff);
+  return out;
+}
+
+function matchesFilter(spentOn: string, filter: FilterState): boolean {
+  if (filter.period === 'all') return true;
+  const ref = new Date(filter.reference);
+  if (Number.isNaN(ref.getTime())) return true;
+  const at = new Date(spentOn);
+  if (Number.isNaN(at.getTime())) return false;
+
+  if (filter.period === 'day') {
+    return (
+      at.getFullYear() === ref.getFullYear() &&
+      at.getMonth() === ref.getMonth() &&
+      at.getDate() === ref.getDate()
+    );
+  }
+  if (filter.period === 'week') {
+    const start = startOfWeek(ref);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    return at >= start && at < end;
+  }
+  if (filter.period === 'month') {
+    return at.getFullYear() === ref.getFullYear() && at.getMonth() === ref.getMonth();
+  }
+  if (filter.period === 'year') {
+    return at.getFullYear() === ref.getFullYear();
+  }
+  return true;
+}
+
+function categoryLabel(value: ExpenseCategory): string {
+  return EXPENSE_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
+
+function subCategoryLabel(value: string): string {
+  return MAINTENANCE_SUBCATEGORIES.find((s) => s.value === value)?.label ?? value;
 }
 
 function formatMoney(amount: number, currency = 'INR'): string {
@@ -67,7 +131,8 @@ type FinanceOp =
       title: string;
       amount: number;
       bucket: ExpenseBucket;
-      category: 'other';
+      category: ExpenseCategory;
+      subCategory?: string;
       frequency?: ExpenseCadence;
       cadence?: ExpenseCadence;
       spentOn: string;
@@ -113,6 +178,12 @@ function ExpenseRow({
         <div className="text-xs text-duored-muted">
           {showFrequency && <p>Freq: {frequencyLabel}</p>}
           <p>{new Date(item.spentOn).toLocaleDateString()}</p>
+          <p>
+            {categoryLabel(item.category)}
+            {item.category === 'maintenance' && item.subCategory
+              ? ` › ${subCategoryLabel(item.subCategory)}`
+              : ''}
+          </p>
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -166,6 +237,122 @@ function BuyRow({
   );
 }
 
+function ExpenseGroupedList({
+  expenses,
+  filter,
+  showFrequency,
+  onRemove,
+}: {
+  expenses: ExpenseEntry[];
+  filter: FilterState;
+  showFrequency: boolean;
+  onRemove: (id: string) => void;
+}) {
+  const filtered = useMemo(
+    () => expenses.filter((e) => matchesFilter(e.spentOn, filter)),
+    [expenses, filter],
+  );
+
+  const grouped = useMemo(() => {
+    const byCategory = new Map<ExpenseCategory, ExpenseEntry[]>();
+    for (const entry of filtered) {
+      const list = byCategory.get(entry.category);
+      if (list) list.push(entry);
+      else byCategory.set(entry.category, [entry]);
+    }
+    const order: ExpenseCategory[] = EXPENSE_CATEGORIES.map((c) => c.value);
+    return order
+      .map((cat) => ({ category: cat, items: byCategory.get(cat) ?? [] }))
+      .filter((g) => g.items.length > 0);
+  }, [filtered]);
+
+  if (filtered.length === 0) {
+    return <p className="font-semibold text-duored-muted">No expenses match this filter.</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {grouped.map(({ category, items }) => {
+        const total = items.reduce((sum, e) => sum + e.amount, 0);
+        return (
+          <div key={category} className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-extrabold uppercase tracking-[0.12em] text-duored-deep">
+                {categoryLabel(category)} ({items.length})
+              </h4>
+              <span className="text-xs font-bold text-duored-muted">{formatMoney(total)}</span>
+            </div>
+            {category === 'maintenance' ? (
+              <MaintenanceSubGroups items={items} showFrequency={showFrequency} onRemove={onRemove} />
+            ) : (
+              <ul className="space-y-2">
+                {items.map((entry) => (
+                  <ExpenseRow
+                    key={entry.id}
+                    item={entry}
+                    onRemove={onRemove}
+                    showFrequency={showFrequency}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MaintenanceSubGroups({
+  items,
+  showFrequency,
+  onRemove,
+}: {
+  items: ExpenseEntry[];
+  showFrequency: boolean;
+  onRemove: (id: string) => void;
+}) {
+  const buckets = useMemo(() => {
+    const map = new Map<string, ExpenseEntry[]>();
+    for (const entry of items) {
+      const key = entry.subCategory || '_unset';
+      const list = map.get(key);
+      if (list) list.push(entry);
+      else map.set(key, [entry]);
+    }
+    const ordered: Array<{ key: string; label: string; items: ExpenseEntry[] }> = [];
+    for (const sub of MAINTENANCE_SUBCATEGORIES) {
+      const list = map.get(sub.value);
+      if (list && list.length) ordered.push({ key: sub.value, label: sub.label, items: list });
+    }
+    const unset = map.get('_unset');
+    if (unset && unset.length) ordered.push({ key: '_unset', label: 'Uncategorized', items: unset });
+    return ordered;
+  }, [items]);
+
+  return (
+    <div className="space-y-2 pl-2">
+      {buckets.map((bucket) => (
+        <div key={bucket.key} className="space-y-2">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">
+            ↳ {bucket.label} ({bucket.items.length})
+          </p>
+          <ul className="space-y-2">
+            {bucket.items.map((entry) => (
+              <ExpenseRow
+                key={entry.id}
+                item={entry}
+                onRemove={onRemove}
+                showFrequency={showFrequency}
+              />
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ExpenseEditor({
   bucket,
   title,
@@ -177,6 +364,8 @@ function ExpenseEditor({
   customFrequencyOptions,
   onAddExpense,
   onRemoveExpense,
+  filter,
+  setFilter,
   headerAction,
 }: {
   bucket: ExpenseBucket;
@@ -189,6 +378,8 @@ function ExpenseEditor({
   customFrequencyOptions: string[];
   onAddExpense: () => void;
   onRemoveExpense: (expenseId: string) => void;
+  filter: FilterState;
+  setFilter: Dispatch<SetStateAction<FilterState>>;
   headerAction?: ReactNode;
 }) {
   const supportsFrequency = bucket === 'predicted';
@@ -222,6 +413,37 @@ function ExpenseEditor({
           onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))}
           placeholder="Price"
         />
+        <select
+          className="text-input"
+          value={form.category}
+          onChange={(e) =>
+            setForm((s) => ({
+              ...s,
+              category: e.target.value as ExpenseCategory,
+              subCategory: e.target.value === 'maintenance' ? s.subCategory : '',
+            }))
+          }
+        >
+          {EXPENSE_CATEGORIES.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        {form.category === 'maintenance' && (
+          <select
+            className="text-input"
+            value={form.subCategory}
+            onChange={(e) => setForm((s) => ({ ...s, subCategory: e.target.value }))}
+          >
+            <option value="">Subcategory (optional)</option>
+            {MAINTENANCE_SUBCATEGORIES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        )}
         {supportsFrequency && (
           <>
             <div className="flex items-center gap-2 rounded-xl border-2 border-duored-soft bg-white/80 px-3 py-2 md:col-span-2">
@@ -281,20 +503,36 @@ function ExpenseEditor({
       </button>
 
       <h3 className="mb-2 mt-5 text-sm font-bold uppercase tracking-[0.16em] text-duored-muted">expense_list</h3>
-      {expenses.length === 0 ? (
-        <p className="font-semibold text-duored-muted">No expenses yet in this section.</p>
-      ) : (
-        <ul className="space-y-2">
-          {expenses.map((entry) => (
-            <ExpenseRow
-              key={entry.id}
-              item={entry}
-              onRemove={onRemoveExpense}
-              showFrequency={supportsFrequency}
-            />
-          ))}
-        </ul>
-      )}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-duored-muted">Filter</span>
+        <select
+          className="text-input"
+          value={filter.period}
+          onChange={(e) => setFilter((s) => ({ ...s, period: e.target.value as FilterPeriod }))}
+        >
+          <option value="all">All time</option>
+          <option value="day">Day</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+          <option value="year">Year</option>
+        </select>
+        {filter.period !== 'all' && (
+          <input
+            type="date"
+            className="text-input"
+            value={filter.reference}
+            onChange={(e) => setFilter((s) => ({ ...s, reference: e.target.value }))}
+          />
+        )}
+      </div>
+
+      <ExpenseGroupedList
+        expenses={expenses}
+        filter={filter}
+        showFrequency={supportsFrequency}
+        onRemove={onRemoveExpense}
+      />
 
       <datalist id={`custom-frequency-${bucket}`}>
         {customFrequencyOptions.map((option) => (
@@ -314,6 +552,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
 
   const [predictedForm, setPredictedForm] = useState(createExpenseForm);
   const [actualForm, setActualForm] = useState(createExpenseForm);
+  const [predictedFilter, setPredictedFilter] = useState<FilterState>(createFilter);
+  const [actualFilter, setActualFilter] = useState<FilterState>(createFilter);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const predictedExpenses = useMemo(
@@ -370,12 +610,16 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       bucket === 'actual' ? 'one-time' : form.mode === 'one-time' ? 'one-time' : (form.frequency as ExpenseCadence);
     const notes = cadence === 'custom' ? `${CUSTOM_FREQ_PREFIX}${form.customFrequency.trim()}` : undefined;
 
+    const subCategory =
+      form.category === 'maintenance' && form.subCategory ? form.subCategory : undefined;
+
     runMutation({
       op: 'add_expense',
       title: form.title,
       amount,
       bucket,
-      category: 'other',
+      category: form.category,
+      subCategory,
       frequency: cadence,
       spentOn: new Date().toISOString().slice(0, 10),
       notes,
@@ -401,6 +645,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             customFrequencyOptions={customFrequencyOptions}
             onAddExpense={() => addExpense('predicted', predictedForm, setPredictedForm)}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
+            filter={predictedFilter}
+            setFilter={setPredictedFilter}
           />
           <ExpenseEditor
             bucket="actual"
@@ -413,6 +659,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             customFrequencyOptions={customFrequencyOptions}
             onAddExpense={() => addExpense('actual', actualForm, setActualForm)}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
+            filter={actualFilter}
+            setFilter={setActualFilter}
             headerAction={
               <CsvImportButton
                 isPending={isPending}

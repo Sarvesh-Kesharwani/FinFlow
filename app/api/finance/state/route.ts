@@ -41,10 +41,18 @@ function normalizeExpenseCategory(value: string): ExpenseCategory {
     'fuel',
     'insurance',
     'maintenance',
+    'savings',
+    'money+',
     'other',
   ]);
   const v = value.trim().toLowerCase() as ExpenseCategory;
   return allowed.has(v) ? v : 'other';
+}
+
+function normalizeSubCategory(category: ExpenseCategory, value: unknown): string | undefined {
+  if (category !== 'maintenance') return undefined;
+  const v = String(value ?? '').trim().slice(0, 60);
+  return v || undefined;
 }
 
 function normalizeCadence(value: string): ExpenseCadence {
@@ -105,12 +113,14 @@ export async function POST(req: Request) {
     const amount = normalizeMoney(body.amount);
     if (amount <= 0) return fail('Expense amount must be greater than 0');
 
+    const category = normalizeExpenseCategory(String(body.category ?? 'other'));
     const entry: ExpenseEntry = {
       id: id(),
       title,
       amount,
       bucket: normalizeExpenseBucket(String(body.bucket ?? 'actual')),
-      category: normalizeExpenseCategory(String(body.category ?? 'other')),
+      category,
+      subCategory: normalizeSubCategory(category, body.subCategory),
       cadence: normalizeCadence(String(body.frequency ?? body.cadence ?? 'one-time')),
       spentOn: new Date(String(body.spentOn ?? new Date().toISOString())).toISOString(),
       notes: String(body.notes ?? '').trim() || undefined,
@@ -141,12 +151,14 @@ export async function POST(req: Request) {
       const key = `${spentOn}|${title}|${amount}`;
       if (existingKeys.has(key)) continue;
       existingKeys.add(key);
+      const category = normalizeExpenseCategory(String(r.category ?? 'other'));
       fresh.push({
         id: id(),
         title,
         amount,
         bucket: 'actual',
-        category: normalizeExpenseCategory(String(r.category ?? 'other')),
+        category,
+        subCategory: normalizeSubCategory(category, r.subCategory),
         cadence: 'one-time',
         spentOn,
         notes: String(r.notes ?? '').trim() || undefined,
