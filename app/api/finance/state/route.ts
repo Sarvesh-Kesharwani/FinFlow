@@ -165,6 +165,49 @@ export async function POST(req: Request) {
     );
   }
 
+  if (op === 'edit_expense') {
+    const expenseId = String(body.expenseId ?? '').trim();
+    if (!expenseId) return fail('Expense id is required');
+
+    const existing = state.expenses.find((entry) => entry.id === expenseId);
+    if (!existing) return fail('Expense not found', 404);
+
+    const title = toTitleCase(String(body.title ?? ''));
+    if (!title) return fail('Expense title is required');
+
+    const amount = normalizeMoney(body.amount);
+    if (amount <= 0) return fail('Expense amount must be greater than 0');
+
+    const bucket = normalizeExpenseBucket(String(body.bucket ?? existing.bucket));
+    const category = normalizeExpenseCategory(String(body.category ?? existing.category));
+    const cadence = normalizeCadence(
+      String(body.frequency ?? body.cadence ?? (bucket === 'predicted' ? existing.cadence : 'one-time')),
+    );
+    if (bucket === 'predicted' && cadence === 'one-time') {
+      return fail('Predicted expenses need a recurring frequency');
+    }
+
+    const updatedEntry: ExpenseEntry = {
+      ...existing,
+      title,
+      amount,
+      bucket,
+      category,
+      subCategory: normalizeSubCategory(category, body.subCategory),
+      cadence: bucket === 'actual' ? 'one-time' : cadence,
+      spentOn: new Date(String(body.spentOn ?? existing.spentOn)).toISOString(),
+      notes: String(body.notes ?? '').trim() || undefined,
+    };
+
+    return persist(
+      {
+        ...state,
+        expenses: state.expenses.map((entry) => (entry.id === expenseId ? updatedEntry : entry)),
+      },
+      accessToken,
+    );
+  }
+
   if (op === 'bulk_add_expenses') {
     const incoming = Array.isArray(body.expenses) ? (body.expenses as unknown[]) : [];
     const existingKeys = new Set(state.expenses.map((e) => `${e.spentOn}|${e.title}|${e.amount}`));

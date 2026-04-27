@@ -42,6 +42,18 @@ function createExpenseForm(): ExpenseFormState {
   };
 }
 
+function createExpenseFormFromEntry(entry: ExpenseEntry): ExpenseFormState {
+  return {
+    title: entry.title,
+    amount: String(entry.amount),
+    mode: entry.cadence === 'one-time' ? 'one-time' : 'repetitive',
+    frequency: entry.bucket === 'predicted' ? entry.cadence : '',
+    customFrequency: entry.cadence === 'custom' ? parseCustomFrequency(entry.notes) : '',
+    category: entry.category,
+    subCategory: entry.subCategory ?? '',
+  };
+}
+
 type FilterPeriod = 'all' | 'day' | 'week' | 'month' | 'year';
 
 type ActualFilter = {
@@ -155,6 +167,19 @@ type FinanceOp =
       spentOn: string;
       notes?: string;
     }
+  | {
+      op: 'edit_expense';
+      expenseId: string;
+      title: string;
+      amount: number;
+      bucket: ExpenseBucket;
+      category: ExpenseCategory;
+      subCategory?: string;
+      frequency?: ExpenseCadence;
+      cadence?: ExpenseCadence;
+      spentOn: string;
+      notes?: string;
+    }
   | { op: 'remove_expense'; expenseId: string }
   | { op: 'bulk_add_expenses'; expenses: unknown[] }
   | { op: 'add_buy_item'; url: string; notes?: string }
@@ -178,10 +203,12 @@ async function mutateFinance(payload: FinanceOp): Promise<FinanceStore> {
 function ExpenseRow({
   item,
   onRemove,
+  onEdit,
   showFrequency,
 }: {
   item: ExpenseEntry;
   onRemove: (id: string) => void;
+  onEdit: (item: ExpenseEntry) => void;
   showFrequency: boolean;
 }) {
   const customFrequency = parseCustomFrequency(item.notes);
@@ -205,6 +232,9 @@ function ExpenseRow({
       </div>
       <div className="flex items-center gap-2">
         <p className="font-extrabold text-duored-deep">{formatMoney(item.amount)}</p>
+        <button className="chip-soft" onClick={() => onEdit(item)} type="button">
+          Edit
+        </button>
         <button className="chip-danger" onClick={() => onRemove(item.id)} type="button">
           Remove
         </button>
@@ -258,11 +288,23 @@ function ExpenseGroupedList({
   expenses,
   filter,
   showFrequency,
+  editingExpenseId,
+  editForm,
+  setEditForm,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
   onRemove,
 }: {
   expenses: ExpenseEntry[];
   filter: FilterState;
   showFrequency: boolean;
+  editingExpenseId: string | null;
+  editForm: ExpenseFormState | null;
+  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
+  onStartEdit: (item: ExpenseEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
 }) {
   const filtered = useMemo(
@@ -300,15 +342,31 @@ function ExpenseGroupedList({
               <span className="text-xs font-bold text-duored-muted">{formatMoney(total)}</span>
             </div>
             {category === 'maintenance' ? (
-              <MaintenanceSubGroups items={items} showFrequency={showFrequency} onRemove={onRemove} />
+              <MaintenanceSubGroups
+                items={items}
+                showFrequency={showFrequency}
+                editingExpenseId={editingExpenseId}
+                editForm={editForm}
+                setEditForm={setEditForm}
+                onStartEdit={onStartEdit}
+                onCancelEdit={onCancelEdit}
+                onSaveEdit={onSaveEdit}
+                onRemove={onRemove}
+              />
             ) : (
               <ul className="space-y-2">
                 {items.map((entry) => (
-                  <ExpenseRow
+                  <ExpenseListItem
                     key={entry.id}
                     item={entry}
-                    onRemove={onRemove}
                     showFrequency={showFrequency}
+                    isEditing={editingExpenseId === entry.id}
+                    editForm={editForm}
+                    setEditForm={setEditForm}
+                    onStartEdit={onStartEdit}
+                    onCancelEdit={onCancelEdit}
+                    onSaveEdit={onSaveEdit}
+                    onRemove={onRemove}
                   />
                 ))}
               </ul>
@@ -323,10 +381,22 @@ function ExpenseGroupedList({
 function MaintenanceSubGroups({
   items,
   showFrequency,
+  editingExpenseId,
+  editForm,
+  setEditForm,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
   onRemove,
 }: {
   items: ExpenseEntry[];
   showFrequency: boolean;
+  editingExpenseId: string | null;
+  editForm: ExpenseFormState | null;
+  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
+  onStartEdit: (item: ExpenseEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (expenseId: string) => void;
   onRemove: (id: string) => void;
 }) {
   const buckets = useMemo(() => {
@@ -356,11 +426,17 @@ function MaintenanceSubGroups({
           </p>
           <ul className="space-y-2">
             {bucket.items.map((entry) => (
-              <ExpenseRow
+              <ExpenseListItem
                 key={entry.id}
                 item={entry}
-                onRemove={onRemove}
                 showFrequency={showFrequency}
+                isEditing={editingExpenseId === entry.id}
+                editForm={editForm}
+                setEditForm={setEditForm}
+                onStartEdit={onStartEdit}
+                onCancelEdit={onCancelEdit}
+                onSaveEdit={onSaveEdit}
+                onRemove={onRemove}
               />
             ))}
           </ul>
@@ -368,6 +444,140 @@ function MaintenanceSubGroups({
       ))}
     </div>
   );
+}
+
+function ExpenseListItem({
+  item,
+  showFrequency,
+  isEditing,
+  editForm,
+  setEditForm,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onRemove,
+}: {
+  item: ExpenseEntry;
+  showFrequency: boolean;
+  isEditing: boolean;
+  editForm: ExpenseFormState | null;
+  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
+  onStartEdit: (item: ExpenseEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (expenseId: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  if (isEditing && editForm) {
+    return (
+      <li className="lift-card space-y-3">
+        <div className="grid gap-2 md:grid-cols-2">
+          <input
+            className="text-input"
+            value={editForm.title}
+            onChange={(e) => setEditForm((s) => (s ? { ...s, title: e.target.value } : s))}
+            placeholder="Expense name"
+          />
+          <input
+            className="text-input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={editForm.amount}
+            onChange={(e) => setEditForm((s) => (s ? { ...s, amount: e.target.value } : s))}
+            placeholder="Price"
+          />
+          <select
+            className="text-input"
+            value={editForm.category}
+            onChange={(e) =>
+              setEditForm((s) =>
+                s
+                  ? {
+                      ...s,
+                      category: e.target.value as ExpenseCategory,
+                      subCategory: e.target.value === 'maintenance' ? s.subCategory : '',
+                    }
+                  : s,
+              )
+            }
+          >
+            {EXPENSE_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          {editForm.category === 'maintenance' && (
+            <select
+              className="text-input"
+              value={editForm.subCategory}
+              onChange={(e) => setEditForm((s) => (s ? { ...s, subCategory: e.target.value } : s))}
+            >
+              <option value="">Subcategory (optional)</option>
+              {MAINTENANCE_SUBCATEGORIES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {showFrequency && (
+            <>
+              <select
+                className="text-input"
+                value={editForm.frequency}
+                onChange={(e) =>
+                  setEditForm((s) =>
+                    s
+                      ? {
+                          ...s,
+                          mode: 'repetitive',
+                          frequency: e.target.value as '' | ExpenseCadence,
+                        }
+                      : s,
+                  )
+                }
+              >
+                <option value="">Frequency of purchase</option>
+                {EXPENSE_CADENCE_OPTIONS.filter((option) => option.value !== 'one-time').map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {editForm.frequency === 'custom' ? (
+                <input
+                  className="text-input"
+                  value={editForm.customFrequency}
+                  onChange={(e) => setEditForm((s) => (s ? { ...s, customFrequency: e.target.value } : s))}
+                  placeholder="Custom frequency (for example: every 45 days)"
+                />
+              ) : (
+                <div className="text-xs font-semibold text-duored-muted">
+                  Keep a reusable label when this purchase cadence is custom.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-duored-muted">
+            {showFrequency ? 'Edit planned expense details.' : 'Edit the logged expense details.'}
+          </p>
+          <div className="flex items-center gap-2">
+            <button className="chip-soft" onClick={onCancelEdit} type="button">
+              Cancel
+            </button>
+            <button className="btn-duored" onClick={() => onSaveEdit(item.id)} type="button">
+              Save
+            </button>
+          </div>
+        </div>
+      </li>
+    );
+  }
+
+  return <ExpenseRow item={item} onEdit={onStartEdit} onRemove={onRemove} showFrequency={showFrequency} />;
 }
 
 function ExpenseEditor({
@@ -380,6 +590,12 @@ function ExpenseEditor({
   isPending,
   customFrequencyOptions,
   onAddExpense,
+  editingExpenseId,
+  editForm,
+  setEditForm,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
   onRemoveExpense,
   filter,
   setFilter,
@@ -394,6 +610,12 @@ function ExpenseEditor({
   isPending: boolean;
   customFrequencyOptions: string[];
   onAddExpense: () => void;
+  editingExpenseId: string | null;
+  editForm: ExpenseFormState | null;
+  setEditForm: Dispatch<SetStateAction<ExpenseFormState | null>>;
+  onStartEdit: (item: ExpenseEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (expenseId: string) => void;
   onRemoveExpense: (expenseId: string) => void;
   filter: FilterState;
   setFilter: Dispatch<SetStateAction<FilterState>>;
@@ -559,6 +781,12 @@ function ExpenseEditor({
         expenses={expenses}
         filter={filter}
         showFrequency={supportsFrequency}
+        editingExpenseId={editingExpenseId}
+        editForm={editForm}
+        setEditForm={setEditForm}
+        onStartEdit={onStartEdit}
+        onCancelEdit={onCancelEdit}
+        onSaveEdit={onSaveEdit}
         onRemove={onRemoveExpense}
       />
 
@@ -580,6 +808,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
 
   const [predictedForm, setPredictedForm] = useState(createExpenseForm);
   const [actualForm, setActualForm] = useState(createExpenseForm);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [editingExpenseForm, setEditingExpenseForm] = useState<ExpenseFormState | null>(null);
   const [predictedFilter, setPredictedFilter] = useState<FilterState>(createPredictedFilter);
   const [actualFilter, setActualFilter] = useState<FilterState>(createActualFilter);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
@@ -610,6 +840,16 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
         .then((next) => setState(next))
         .catch((e) => setError((e as Error).message));
     });
+  }
+
+  function beginEditingExpense(item: ExpenseEntry) {
+    setEditingExpenseId(item.id);
+    setEditingExpenseForm(createExpenseFormFromEntry(item));
+  }
+
+  function stopEditingExpense() {
+    setEditingExpenseId(null);
+    setEditingExpenseForm(null);
   }
 
   function addExpense(bucket: ExpenseBucket, form: ExpenseFormState, setForm: Dispatch<SetStateAction<ExpenseFormState>>) {
@@ -656,6 +896,57 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     setForm(createExpenseForm);
   }
 
+  function saveEditedExpense(expenseId: string) {
+    const form = editingExpenseForm;
+    const existing = state.expenses.find((entry) => entry.id === expenseId);
+    if (!form || !existing) {
+      setError('Expense to edit was not found');
+      return;
+    }
+
+    if (!form.title.trim()) {
+      setError('Expense name is required');
+      return;
+    }
+
+    const amount = Number(form.amount || '0');
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError('Expense price must be greater than 0');
+      return;
+    }
+
+    if (existing.bucket === 'predicted' && !form.frequency) {
+      setError('Select a frequency for predicted expenses');
+      return;
+    }
+
+    if (existing.bucket === 'predicted' && form.frequency === 'custom' && !form.customFrequency.trim()) {
+      setError('Add a custom frequency label so you can reuse it');
+      return;
+    }
+
+    const cadence: ExpenseCadence =
+      existing.bucket === 'actual' ? 'one-time' : (form.frequency as ExpenseCadence);
+    const notes = cadence === 'custom' ? `${CUSTOM_FREQ_PREFIX}${form.customFrequency.trim()}` : undefined;
+    const subCategory =
+      form.category === 'maintenance' && form.subCategory ? form.subCategory : undefined;
+
+    runMutation({
+      op: 'edit_expense',
+      expenseId,
+      title: form.title,
+      amount,
+      bucket: existing.bucket,
+      category: form.category,
+      subCategory,
+      frequency: cadence,
+      spentOn: existing.spentOn,
+      notes,
+    });
+
+    stopEditingExpense();
+  }
+
   return (
     <div className="space-y-6">
       {error && <p className="rounded-xl border-2 border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</p>}
@@ -672,6 +963,12 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             isPending={isPending}
             customFrequencyOptions={customFrequencyOptions}
             onAddExpense={() => addExpense('predicted', predictedForm, setPredictedForm)}
+            editingExpenseId={editingExpenseId}
+            editForm={editingExpenseForm}
+            setEditForm={setEditingExpenseForm}
+            onStartEdit={beginEditingExpense}
+            onCancelEdit={stopEditingExpense}
+            onSaveEdit={saveEditedExpense}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
             filter={predictedFilter}
             setFilter={setPredictedFilter}
@@ -686,6 +983,12 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             isPending={isPending}
             customFrequencyOptions={customFrequencyOptions}
             onAddExpense={() => addExpense('actual', actualForm, setActualForm)}
+            editingExpenseId={editingExpenseId}
+            editForm={editingExpenseForm}
+            setEditForm={setEditingExpenseForm}
+            onStartEdit={beginEditingExpense}
+            onCancelEdit={stopEditingExpense}
+            onSaveEdit={saveEditedExpense}
             onRemoveExpense={(expenseId) => runMutation({ op: 'remove_expense', expenseId })}
             filter={actualFilter}
             setFilter={setActualFilter}
