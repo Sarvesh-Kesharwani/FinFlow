@@ -53,8 +53,8 @@ export const DEFAULT_FINANCE_STORE: FinanceStore = {
 
 export const EXPENSE_CATEGORIES: Array<{ value: ExpenseCategory; label: string }> = [
   { value: 'maintenance', label: 'Maintenance' },
-  { value: 'savings', label: 'Savings' },
   { value: 'money+', label: 'Money+' },
+  { value: 'savings', label: 'Savings' },
 ];
 
 export const MAINTENANCE_SUBCATEGORIES: Array<{ value: MaintenanceSubcategory; label: string }> = [

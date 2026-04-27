@@ -322,30 +322,54 @@ function ExpenseGroupedList({
     const order: ExpenseCategory[] = EXPENSE_CATEGORIES.map((c) => c.value);
     return order
       .map((cat) => ({ category: cat, items: byCategory.get(cat) ?? [] }))
-      .filter((g) => g.items.length > 0);
   }, [filtered]);
 
-  if (filtered.length === 0) {
-    return <p className="font-semibold text-duored-muted">No expenses match this filter.</p>;
-  }
+  function renderCategoryBlock(category: ExpenseCategory, items: ExpenseEntry[]) {
+    const total = items.reduce((sum, e) => sum + e.amount, 0);
+    const isSavings = category === 'savings';
 
-  return (
-    <div className="space-y-4">
-      {grouped.map(({ category, items }) => {
-        const total = items.reduce((sum, e) => sum + e.amount, 0);
-        return (
-          <div key={category} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-extrabold uppercase tracking-[0.12em] text-duored-deep">
-                {categoryLabel(category)} ({items.length})
-              </h4>
-              <span className="text-xs font-bold text-duored-muted">{formatMoney(total)}</span>
-            </div>
-            {category === 'maintenance' ? (
-              <MaintenanceSubGroups
-                items={items}
+    return (
+      <div key={category} className="space-y-2 rounded-2xl border border-duored-soft/70 bg-white/60 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-extrabold uppercase tracking-[0.12em] text-duored-deep">
+              {categoryLabel(category)} ({items.length})
+            </h4>
+            {isSavings && (
+              <button
+                className="chip-soft h-6 w-6 p-0 text-center font-extrabold"
+                type="button"
+                title="Transfer to saving acct/ purchase of gold"
+                aria-label="Transfer to saving acct/ purchase of gold"
+              >
+                i
+              </button>
+            )}
+          </div>
+          <span className="text-xs font-bold text-duored-muted">{formatMoney(total)}</span>
+        </div>
+        {items.length === 0 ? (
+          <p className="text-sm font-semibold text-duored-muted">No expenses in this category.</p>
+        ) : category === 'maintenance' ? (
+          <MaintenanceSubGroups
+            items={items}
+            showFrequency={showFrequency}
+            editingExpenseId={editingExpenseId}
+            editForm={editForm}
+            setEditForm={setEditForm}
+            onStartEdit={onStartEdit}
+            onCancelEdit={onCancelEdit}
+            onSaveEdit={onSaveEdit}
+            onRemove={onRemove}
+          />
+        ) : (
+          <ul className="space-y-2">
+            {items.map((entry) => (
+              <ExpenseListItem
+                key={entry.id}
+                item={entry}
                 showFrequency={showFrequency}
-                editingExpenseId={editingExpenseId}
+                isEditing={editingExpenseId === entry.id}
                 editForm={editForm}
                 setEditForm={setEditForm}
                 onStartEdit={onStartEdit}
@@ -353,27 +377,28 @@ function ExpenseGroupedList({
                 onSaveEdit={onSaveEdit}
                 onRemove={onRemove}
               />
-            ) : (
-              <ul className="space-y-2">
-                {items.map((entry) => (
-                  <ExpenseListItem
-                    key={entry.id}
-                    item={entry}
-                    showFrequency={showFrequency}
-                    isEditing={editingExpenseId === entry.id}
-                    editForm={editForm}
-                    setEditForm={setEditForm}
-                    onStartEdit={onStartEdit}
-                    onCancelEdit={onCancelEdit}
-                    onSaveEdit={onSaveEdit}
-                    onRemove={onRemove}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        );
-      })}
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
+  if (filtered.length === 0) {
+    return <p className="font-semibold text-duored-muted">No expenses match this filter.</p>;
+  }
+
+  if (filter.kind === 'actual') {
+    return (
+      <div className="grid gap-4 xl:grid-cols-3">
+        {grouped.map(({ category, items }) => renderCategoryBlock(category, items))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {grouped.filter(({ items }) => items.length > 0).map(({ category, items }) => renderCategoryBlock(category, items))}
     </div>
   );
 }
