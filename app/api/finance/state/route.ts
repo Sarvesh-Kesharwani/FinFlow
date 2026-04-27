@@ -81,6 +81,18 @@ function sanitizeImageUrl(value: unknown): string | undefined {
   return out || undefined;
 }
 
+function sanitizeSourceUrl(value: unknown): string | undefined {
+  const out = String(value ?? '').trim().slice(0, 1000);
+  return assertUrl(out) ? out : undefined;
+}
+
+function lastReturnableDate(days?: number): string | undefined {
+  if (!days || days <= 0) return undefined;
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 async function loadAuthoritativeState(): Promise<FinanceStore> {
   const cookieStore = await getCookieFinanceStore();
   const session = await getSession();
@@ -156,6 +168,8 @@ export async function POST(req: Request) {
       spentOn: new Date(String(body.spentOn ?? new Date().toISOString())).toISOString(),
       notes: String(body.notes ?? '').trim() || undefined,
       imageUrl: sanitizeImageUrl(body.imageUrl),
+      sourceUrl: sanitizeSourceUrl(body.sourceUrl),
+      sourcePlatform: String(body.sourcePlatform ?? '').trim().slice(0, 80) || undefined,
     };
 
     return persist({ ...state, expenses: [entry, ...state.expenses] });
@@ -276,6 +290,8 @@ export async function POST(req: Request) {
         spentOn,
         notes: String(r.notes ?? '').trim() || undefined,
         imageUrl: sanitizeImageUrl(r.imageUrl),
+        sourceUrl: sanitizeSourceUrl(r.sourceUrl),
+        sourcePlatform: String(r.sourcePlatform ?? '').trim().slice(0, 80) || undefined,
       });
     }
 
@@ -312,6 +328,9 @@ export async function POST(req: Request) {
       notes: String(body.notes ?? '').trim() || undefined,
       createdAt: new Date().toISOString(),
       imageUrl: sanitizeImageUrl(body.imageUrl) ?? extracted.imageUrl,
+      returnable: extracted.returnable,
+      returnDays: extracted.returnDays,
+      lastReturnableOn: lastReturnableDate(extracted.returnDays),
     };
     return persist({ ...state, buyList: [...state.buyList, item] });
   }
@@ -324,7 +343,9 @@ export async function POST(req: Request) {
     const notes = [
       item.notes?.trim(),
       item.sourcePlatform ? `Bought via ${item.sourcePlatform}` : '',
-      item.url ? `Source: ${item.url}` : '',
+      item.returnable
+        ? `Returnable${item.returnDays ? ` for ${item.returnDays} days` : ''}${item.lastReturnableOn ? ` until ${item.lastReturnableOn}` : ''}`
+        : 'Not returnable',
     ]
       .filter(Boolean)
       .join(' | ');
@@ -340,6 +361,8 @@ export async function POST(req: Request) {
       spentOn: new Date().toISOString(),
       notes: notes || undefined,
       imageUrl: item.imageUrl,
+      sourceUrl: item.url,
+      sourcePlatform: item.sourcePlatform,
     };
 
     return persist(

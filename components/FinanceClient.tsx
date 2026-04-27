@@ -227,6 +227,12 @@ function getVisibleExpenseNotes(item: ExpenseEntry): string | null {
   return item.notes;
 }
 
+function getReturnLabel(item: BuyListItem): string {
+  if (!item.returnable) return 'Not returnable';
+  const days = item.returnDays ? `${item.returnDays} day${item.returnDays === 1 ? '' : 's'}` : 'returnable';
+  return item.lastReturnableOn ? `Returnable: ${days}, last date ${item.lastReturnableOn}` : `Returnable: ${days}`;
+}
+
 async function mutateFinance(payload: FinanceOp): Promise<FinanceStore> {
   const res = await fetch('/api/finance/state', {
     method: 'POST',
@@ -359,6 +365,11 @@ function ExpenseRow({
               {item.category === 'maintenance' && item.subCategory ? ` > ${subCategoryLabel(item.subCategory)}` : ''}
             </p>
             {visibleNotes && <p className="mt-1 break-words">{visibleNotes}</p>}
+            {item.sourceUrl && (
+              <a href={item.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-xs text-duored-link underline">
+                Product link{item.sourcePlatform ? ` (${item.sourcePlatform})` : ''}
+              </a>
+            )}
           </div>
         </div>
       </div>
@@ -405,6 +416,7 @@ function BuyRow({
           <a href={item.url} target="_blank" rel="noreferrer" className="block truncate text-xs text-duored-link underline">
             {item.url}
           </a>
+          <p className="mt-1 text-xs font-bold text-duored-muted">{getReturnLabel(item)}</p>
           {item.notes && <p className="mt-1 text-xs text-duored-muted">{item.notes}</p>}
         </div>
       </div>
@@ -1482,8 +1494,16 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
                             category: 'maintenance',
                             cadence: 'one-time',
                             spentOn: new Date().toISOString(),
-                            notes: item.notes,
+                            notes: [
+                              item.notes,
+                              item.sourcePlatform ? `Bought via ${item.sourcePlatform}` : '',
+                              getReturnLabel(item),
+                            ]
+                              .filter(Boolean)
+                              .join(' | '),
                             imageUrl: item.imageUrl,
+                            sourceUrl: item.url,
+                            sourcePlatform: item.sourcePlatform,
                           };
                           return {
                             ...current,

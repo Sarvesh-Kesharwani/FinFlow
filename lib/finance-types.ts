@@ -19,6 +19,8 @@ export interface ExpenseEntry {
   spentOn: string; // ISO date
   notes?: string;
   imageUrl?: string;
+  sourceUrl?: string;
+  sourcePlatform?: string;
 }
 
 export interface BuyListItem {
@@ -31,6 +33,9 @@ export interface BuyListItem {
   notes?: string;
   createdAt: string; // ISO datetime
   imageUrl?: string;
+  returnable: boolean;
+  returnDays?: number;
+  lastReturnableOn?: string; // ISO date
 }
 
 export interface FeatureRequestEntry {

@@ -61,6 +61,8 @@ function normalizeExpense(entry: Partial<ExpenseEntry>): ExpenseEntry | null {
     spentOn: new Date(spentOn).toISOString(),
     notes: String(entry.notes ?? '').trim().slice(0, 240) || undefined,
     imageUrl: String(entry.imageUrl ?? '').trim().slice(0, 1000) || undefined,
+    sourceUrl: String(entry.sourceUrl ?? '').trim().slice(0, 1000) || undefined,
+    sourcePlatform: String(entry.sourcePlatform ?? '').trim().slice(0, 80) || undefined,
   };
 }
 
@@ -81,6 +83,9 @@ function normalizeBuyListItem(item: Partial<BuyListItem>): BuyListItem | null {
     notes: String(item.notes ?? '').trim().slice(0, 240) || undefined,
     createdAt: new Date(String(item.createdAt ?? new Date().toISOString())).toISOString(),
     imageUrl: String(item.imageUrl ?? '').trim().slice(0, 1000) || undefined,
+    returnable: Boolean(item.returnable),
+    returnDays: Number.isFinite(Number(item.returnDays)) && Number(item.returnDays) > 0 ? Math.round(Number(item.returnDays)) : undefined,
+    lastReturnableOn: String(item.lastReturnableOn ?? '').trim().slice(0, 20) || undefined,
   };
 }
 

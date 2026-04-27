@@ -4,6 +4,8 @@ export interface ProductDetails {
   currency: string;
   sourcePlatform: string;
   imageUrl: string;
+  returnable: boolean;
+  returnDays?: number;
 }
 
 function cleanText(value: string): string {
@@ -49,6 +51,36 @@ function parsePrice(raw: string): number {
   if (!normalized) return 0;
   const value = Number(normalized[1]);
   return Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
+}
+
+function parseReturnPolicy(html: string): { returnable: boolean; returnDays?: number } {
+  const text = cleanText(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' '),
+  );
+  const lower = text.toLowerCase();
+
+  if (/\b(non[-\s]?returnable|not\s+returnable|no\s+returns?|returns?\s+not\s+available)\b/i.test(text)) {
+    return { returnable: false };
+  }
+
+  const returnWindow =
+    text.match(/(\d{1,3})\s*(?:days?|day)\s+(?:returnable|replacement|returns?|replacement\/return)/i) ||
+    text.match(/(?:returnable|replacement|returns?|replacement\/return)\s+(?:within|in|for)?\s*(\d{1,3})\s*(?:days?|day)/i) ||
+    text.match(/(\d{1,3})\s*(?:days?|day)\s+(?:free\s+)?(?:returns?|replacement)/i);
+
+  if (returnWindow?.[1]) {
+    const days = Number(returnWindow[1]);
+    if (Number.isFinite(days) && days > 0) return { returnable: true, returnDays: Math.round(days) };
+  }
+
+  if (lower.includes('returnable') || lower.includes('replacement') || lower.includes('return window')) {
+    return { returnable: true };
+  }
+
+  return { returnable: false };
 }
 
 function platformFromHost(hostname: string): string {
@@ -142,6 +174,8 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
   let price = 0;
   let currency = 'INR';
   let imageUrl = '';
+  let returnable = false;
+  let returnDays: number | undefined;
 
   try {
     const response = await fetch(url, {
@@ -158,6 +192,9 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
     if (response.ok) {
       const html = await response.text();
       const metas = getMetas(html);
+      const returnPolicy = parseReturnPolicy(html);
+      returnable = returnPolicy.returnable;
+      returnDays = returnPolicy.returnDays;
 
       const ogTitle = getMetaValue(metas, ['og:title', 'twitter:title']);
       if (ogTitle) title = cleanText(ogTitle);
@@ -232,5 +269,7 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
     currency: currency || 'INR',
     sourcePlatform,
     imageUrl,
+    returnable,
+    returnDays,
   };
 }
