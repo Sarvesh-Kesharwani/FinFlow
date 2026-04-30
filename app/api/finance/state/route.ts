@@ -406,6 +406,15 @@ export async function POST(req: Request) {
     );
   }
 
+  if (op === 'reorder_buy_item') {
+    const itemId = String(body.itemId ?? '').trim();
+    const targetIndex = Math.max(0, Math.min(state.buyList.length - 1, Number(body.targetIndex ?? 0)));
+    const fromIndex = state.buyList.findIndex((item) => item.id === itemId);
+    if (fromIndex === -1) return fail('Item not found', 404);
+    if (fromIndex === targetIndex) return Response.json({ ok: true, state });
+    return persist({ ...state, buyList: moveItem(state.buyList, fromIndex, targetIndex) });
+  }
+
   if (op === 'move_to_need_list') {
     const itemId = String(body.itemId ?? '').trim();
     const item = state.buyList.find((entry) => entry.id === itemId);

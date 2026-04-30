@@ -101,6 +101,7 @@ type FinanceOp =
   | { op: 'add_buy_item'; url: string; notes?: string }
   | { op: 'remove_buy_item'; itemId: string }
   | { op: 'move_buy_item'; itemId: string; direction: 'up' | 'down' }
+  | { op: 'reorder_buy_item'; itemId: string; targetIndex: number }
   | { op: 'mark_buy_item_bought'; itemId: string; category?: ExpenseCategory; subCategory?: string }
   | { op: 'remove_need_item'; itemId: string }
   | { op: 'move_need_item'; itemId: string; direction: 'up' | 'down' }
@@ -400,31 +401,60 @@ function BuyRow({
   length,
   affordable,
   isDragging,
+  hideReorderButtons,
+  dropPosition,
   onMove,
   onRemove,
   onBought,
   onDragStart,
   onDragEnd,
+  onItemDragOver,
+  onItemDragLeave,
+  onItemDrop,
 }: {
   item: BuyListItem;
   index: number;
   length: number;
   affordable: boolean;
   isDragging: boolean;
+  hideReorderButtons?: boolean;
+  dropPosition?: 'before' | 'after' | null;
   onMove: (id: string, direction: 'up' | 'down') => void;
   onRemove: (id: string) => void;
   onBought: (id: string) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onItemDragOver?: (index: number, position: 'before' | 'after') => void;
+  onItemDragLeave?: () => void;
+  onItemDrop?: (index: number, position: 'before' | 'after') => void;
 }) {
   return (
     <li
       draggable
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
       onDragEnd={onDragEnd}
-      className={`lift-card flex-col items-start sm:flex-row select-none transition-all duration-200 cursor-grab active:cursor-grabbing
+      onDragOver={onItemDragOver ? (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+        onItemDragOver(index, position);
+      } : undefined}
+      onDragLeave={onItemDragLeave ? (e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) onItemDragLeave();
+      } : undefined}
+      onDrop={onItemDrop ? (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+        onItemDrop(index, position);
+      } : undefined}
+      className={`lift-card flex-col items-start sm:flex-row select-none transition-all duration-200 cursor-grab active:cursor-grabbing relative
         ${affordable ? 'ring-2 ring-emerald-300' : ''}
         ${isDragging ? 'opacity-30 scale-[0.97] shadow-none pointer-events-none' : 'opacity-100 scale-100'}
+        ${dropPosition === 'before' ? 'before:absolute before:left-0 before:right-0 before:-top-1 before:h-1 before:rounded-full before:bg-indigo-500 before:shadow-[0_0_12px_rgba(99,102,241,0.7)] before:animate-pulse' : ''}
+        ${dropPosition === 'after' ? 'after:absolute after:left-0 after:right-0 after:-bottom-1 after:h-1 after:rounded-full after:bg-indigo-500 after:shadow-[0_0_12px_rgba(99,102,241,0.7)] after:animate-pulse' : ''}
       `}
     >
       <div className="mr-2 self-center text-duored-muted/50 text-lg shrink-0 hidden sm:block" aria-hidden>⠿</div>
@@ -445,12 +475,16 @@ function BuyRow({
         <button className="btn-duored px-3 py-1 text-xs" onClick={() => onBought(item.id)} type="button">
           Mark Bought
         </button>
-        <button className="chip-soft" onClick={() => onMove(item.id, 'up')} disabled={index === 0} type="button">
-          Up
-        </button>
-        <button className="chip-soft" onClick={() => onMove(item.id, 'down')} disabled={index === length - 1} type="button">
-          Down
-        </button>
+        {!hideReorderButtons && (
+          <>
+            <button className="chip-soft" onClick={() => onMove(item.id, 'up')} disabled={index === 0} type="button">
+              Up
+            </button>
+            <button className="chip-soft" onClick={() => onMove(item.id, 'down')} disabled={index === length - 1} type="button">
+              Down
+            </button>
+          </>
+        )}
         <button className="chip-danger" onClick={() => onRemove(item.id)} type="button">
           Remove
         </button>
@@ -1053,6 +1087,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
   const [wishlistDrag, setWishlistDrag] = useState<{ itemId: string; fromList: 'need' | 'buy' } | null>(null);
   const [wishlistDropTarget, setWishlistDropTarget] = useState<'need' | 'buy' | null>(null);
+  const [buyDropIndicator, setBuyDropIndicator] = useState<{ index: number; position: 'before' | 'after' } | null>(null);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [draggedExpenseId, setDraggedExpenseId] = useState<string | null>(null);
   const [dragOverCategory, setDragOverCategory] = useState<ExpenseCategory | null>(null);
@@ -1585,27 +1620,48 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
                   ? 'ring-2 ring-blue-400 bg-blue-50/60 shadow-inner'
                   : ''}
               `}
-              onDragOver={(e) => { if (wishlistDrag?.fromList === 'need') e.preventDefault(); }}
+              onDragOver={(e) => { if (wishlistDrag) e.preventDefault(); }}
               onDragEnter={(e) => { e.preventDefault(); if (wishlistDrag?.fromList === 'need') setWishlistDropTarget('buy'); }}
-              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setWishlistDropTarget(null); }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) { setWishlistDropTarget(null); setBuyDropIndicator(null); } }}
               onDrop={(e) => {
                 e.preventDefault();
                 const src = wishlistDrag;
                 setWishlistDropTarget(null);
                 setWishlistDrag(null);
-                if (!src || src.fromList !== 'need') return;
-                runMutation(
-                  { op: 'move_to_buy_list', itemId: src.itemId },
-                  (current) => {
-                    const item = current.needList.find((entry) => entry.id === src.itemId);
-                    if (!item) return current;
-                    return {
-                      ...current,
-                      needList: current.needList.filter((entry) => entry.id !== src.itemId),
-                      buyList: [item, ...current.buyList],
-                    };
-                  },
-                );
+                if (!src) return;
+                if (src.fromList === 'need') {
+                  runMutation(
+                    { op: 'move_to_buy_list', itemId: src.itemId },
+                    (current) => {
+                      const item = current.needList.find((entry) => entry.id === src.itemId);
+                      if (!item) return current;
+                      return {
+                        ...current,
+                        needList: current.needList.filter((entry) => entry.id !== src.itemId),
+                        buyList: [item, ...current.buyList],
+                      };
+                    },
+                  );
+                  return;
+                }
+                if (src.fromList === 'buy') {
+                  setBuyDropIndicator(null);
+                  const fromIdx = state.buyList.findIndex((entry) => entry.id === src.itemId);
+                  if (fromIdx === -1) return;
+                  const target = state.buyList.length - 1;
+                  if (target === fromIdx) return;
+                  runMutation(
+                    { op: 'reorder_buy_item', itemId: src.itemId, targetIndex: target },
+                    (current) => {
+                      const f = current.buyList.findIndex((entry) => entry.id === src.itemId);
+                      if (f === -1) return current;
+                      const next = [...current.buyList];
+                      const [moved] = next.splice(f, 1);
+                      next.splice(target, 0, moved);
+                      return { ...current, buyList: next };
+                    },
+                  );
+                }
               }}
             >
               {wishlistDropTarget === 'buy' && wishlistDrag?.fromList === 'need' && (
@@ -1627,8 +1683,46 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
                       length={state.buyList.length}
                       affordable={affordableSet.has(item.id)}
                       isDragging={wishlistDrag?.itemId === item.id}
+                      hideReorderButtons
+                      dropPosition={
+                        wishlistDrag?.fromList === 'buy' && wishlistDrag.itemId !== item.id && buyDropIndicator?.index === index
+                          ? buyDropIndicator.position
+                          : null
+                      }
+                      onItemDragOver={(idx, position) => {
+                        if (wishlistDrag?.fromList !== 'buy') return;
+                        if (wishlistDrag.itemId === item.id) return;
+                        setBuyDropIndicator((prev) => (prev?.index === idx && prev.position === position ? prev : { index: idx, position }));
+                      }}
+                      onItemDragLeave={() => {
+                        setBuyDropIndicator((prev) => (prev?.index === index ? null : prev));
+                      }}
+                      onItemDrop={(idx, position) => {
+                        const src = wishlistDrag;
+                        setBuyDropIndicator(null);
+                        setWishlistDrag(null);
+                        setWishlistDropTarget(null);
+                        if (!src || src.fromList !== 'buy' || src.itemId === item.id) return;
+                        const fromIdx = state.buyList.findIndex((entry) => entry.id === src.itemId);
+                        if (fromIdx === -1) return;
+                        let target = position === 'before' ? idx : idx + 1;
+                        if (fromIdx < target) target -= 1;
+                        target = Math.max(0, Math.min(state.buyList.length - 1, target));
+                        if (target === fromIdx) return;
+                        runMutation(
+                          { op: 'reorder_buy_item', itemId: src.itemId, targetIndex: target },
+                          (current) => {
+                            const f = current.buyList.findIndex((entry) => entry.id === src.itemId);
+                            if (f === -1) return current;
+                            const next = [...current.buyList];
+                            const [moved] = next.splice(f, 1);
+                            next.splice(target, 0, moved);
+                            return { ...current, buyList: next };
+                          },
+                        );
+                      }}
                       onDragStart={() => setWishlistDrag({ itemId: item.id, fromList: 'buy' })}
-                      onDragEnd={() => { setWishlistDrag(null); setWishlistDropTarget(null); }}
+                      onDragEnd={() => { setWishlistDrag(null); setWishlistDropTarget(null); setBuyDropIndicator(null); }}
                       onMove={(itemId, direction) =>
                         runMutation(
                           { op: 'move_buy_item', itemId, direction },
