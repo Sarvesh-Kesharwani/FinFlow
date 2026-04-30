@@ -22,6 +22,7 @@ export async function loadFinanceState(): Promise<FinanceStore> {
       monthlyIncome: drive.monthlyIncome,
       expenses: drive.expenses,
       buyList: drive.buyList,
+      needList: drive.needList,
       requests: drive.requests,
     };
   } catch {

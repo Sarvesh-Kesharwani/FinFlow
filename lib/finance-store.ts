@@ -112,6 +112,11 @@ export function normalizeFinanceStore(store: Partial<FinanceStore> | null | unde
       .map((item) => normalizeBuyListItem(item))
       .filter((item): item is BuyListItem => !!item),
   );
+  const normalizedNeedList = uniqueById(
+    (store?.needList ?? [])
+      .map((item) => normalizeBuyListItem(item))
+      .filter((item): item is BuyListItem => !!item),
+  );
   const normalizedRequests = uniqueById(
     (store?.requests ?? [])
       .map((item) => normalizeRequest(item))
@@ -122,6 +127,7 @@ export function normalizeFinanceStore(store: Partial<FinanceStore> | null | unde
     monthlyIncome: normalizeMoney(store?.monthlyIncome),
     expenses: normalizedExpenses,
     buyList: normalizedBuyList,
+    needList: normalizedNeedList,
     requests: normalizedRequests,
   };
 }

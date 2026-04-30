@@ -48,6 +48,7 @@ export interface FinanceStore {
   monthlyIncome: number;
   expenses: ExpenseEntry[];
   buyList: BuyListItem[];
+  needList: BuyListItem[];
   requests: FeatureRequestEntry[];
 }
 
@@ -64,6 +65,7 @@ export const DEFAULT_FINANCE_STORE: FinanceStore = {
   monthlyIncome: 0,
   expenses: [],
   buyList: [],
+  needList: [],
   requests: [],
 };
 

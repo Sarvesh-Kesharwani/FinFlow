@@ -20,7 +20,7 @@ export async function GET() {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  let cookieStore: FinanceStore = { monthlyIncome: 0, expenses: [], buyList: [], requests: [] };
+  let cookieStore: FinanceStore = { monthlyIncome: 0, expenses: [], buyList: [], needList: [], requests: [] };
   let driveData = null;
   let localMeta = { updatedAt: null as string | null, dirty: false };
   try {
@@ -34,8 +34,8 @@ export async function GET() {
   }
 
   const driveStore: FinanceStore = driveData
-    ? { monthlyIncome: driveData.monthlyIncome, expenses: driveData.expenses, buyList: driveData.buyList, requests: driveData.requests }
-    : { monthlyIncome: 0, expenses: [], buyList: [], requests: [] };
+    ? { monthlyIncome: driveData.monthlyIncome, expenses: driveData.expenses, buyList: driveData.buyList, needList: driveData.needList, requests: driveData.requests }
+    : { monthlyIncome: 0, expenses: [], buyList: [], needList: [], requests: [] };
 
   return Response.json({
     driveItems: driveStore.buyList.length,
@@ -63,6 +63,7 @@ export async function POST() {
         monthlyIncome: driveData.monthlyIncome,
         expenses: driveData.expenses,
         buyList: driveData.buyList,
+        needList: driveData.needList,
         requests: driveData.requests,
       };
       const replacedLocal = !sameStore(cookieStore, driveStore);
@@ -117,6 +118,7 @@ export async function PUT() {
     monthlyIncome: driveData.monthlyIncome,
     expenses: driveData.expenses,
     buyList: driveData.buyList,
+    needList: driveData.needList,
     requests: driveData.requests,
   });
   await markCookieStoreSynced(driveData.updatedAt);

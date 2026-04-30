@@ -106,6 +106,7 @@ async function loadAuthoritativeState(): Promise<FinanceStore> {
         monthlyIncome: drive.monthlyIncome,
         expenses: drive.expenses,
         buyList: drive.buyList,
+        needList: drive.needList,
         requests: drive.requests,
       };
     }
@@ -314,7 +315,9 @@ export async function POST(req: Request) {
     currency = extracted.currency;
 
     if (!title) return fail('Could not extract product title from this URL');
-    if (price <= 0) {
+
+    // YouTube videos are free - allow price of 0 for them
+    if (price <= 0 && sourcePlatform !== 'YouTube') {
       return fail('Could not extract product price from this URL. Please try another product link.');
     }
 
@@ -401,6 +404,84 @@ export async function POST(req: Request) {
         buyList: moveItem(state.buyList, index, target),
       },
     );
+  }
+
+  if (op === 'move_to_need_list') {
+    const itemId = String(body.itemId ?? '').trim();
+    const item = state.buyList.find((entry) => entry.id === itemId);
+    if (!item) return fail('Item not found', 404);
+    return persist({
+      ...state,
+      buyList: state.buyList.filter((entry) => entry.id !== itemId),
+      needList: [item, ...state.needList],
+    });
+  }
+
+  if (op === 'move_to_buy_list') {
+    const itemId = String(body.itemId ?? '').trim();
+    const item = state.needList.find((entry) => entry.id === itemId);
+    if (!item) return fail('Item not found', 404);
+    return persist({
+      ...state,
+      needList: state.needList.filter((entry) => entry.id !== itemId),
+      buyList: [item, ...state.buyList],
+    });
+  }
+
+  if (op === 'remove_need_item') {
+    const itemId = String(body.itemId ?? '').trim();
+    return persist({ ...state, needList: state.needList.filter((entry) => entry.id !== itemId) });
+  }
+
+  if (op === 'move_need_item') {
+    const itemId = String(body.itemId ?? '').trim();
+    const direction = String(body.direction ?? '').trim();
+    const index = state.needList.findIndex((item) => item.id === itemId);
+    if (index === -1) return fail('Item not found', 404);
+
+    let target = index;
+    if (direction === 'up') target = Math.max(0, index - 1);
+    if (direction === 'down') target = Math.min(state.needList.length - 1, index + 1);
+    if (target === index) return Response.json({ ok: true, state });
+
+    return persist({ ...state, needList: moveItem(state.needList, index, target) });
+  }
+
+  if (op === 'mark_need_item_bought') {
+    const itemId = String(body.itemId ?? '').trim();
+    const item = state.needList.find((entry) => entry.id === itemId);
+    if (!item) return fail('Item not found', 404);
+
+    const notes = [
+      item.notes?.trim(),
+      item.sourcePlatform ? `Bought via ${item.sourcePlatform}` : '',
+      item.returnable
+        ? `Returnable${item.returnDays ? ` for ${item.returnDays} days` : ''}${item.lastReturnableOn ? ` until ${item.lastReturnableOn}` : ''}`
+        : 'Not returnable',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const expense: ExpenseEntry = {
+      id: id(),
+      title: toTitleCase(item.title),
+      amount: normalizeMoney(item.price),
+      bucket: 'actual',
+      category: normalizeExpenseCategory(String(body.category ?? 'maintenance')),
+      subCategory: normalizeSubCategory(normalizeExpenseCategory(String(body.category ?? 'maintenance')), body.subCategory),
+      cadence: 'one-time',
+      spentOn: new Date().toISOString(),
+      notes: notes || undefined,
+      imageUrl: item.imageUrl,
+      sourceUrl: item.url,
+      sourcePlatform: item.sourcePlatform,
+    };
+
+    return persist({
+      ...state,
+      expenses: [expense, ...state.expenses],
+      needList: state.needList.filter((entry) => entry.id !== itemId),
+    });
   }
 
   if (op === 'add_request') {

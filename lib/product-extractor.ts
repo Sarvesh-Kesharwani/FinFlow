@@ -85,6 +85,7 @@ function parseReturnPolicy(html: string): { returnable: boolean; returnDays?: nu
 
 function platformFromHost(hostname: string): string {
   const host = hostname.replace(/^www\./, '').toLowerCase();
+  if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube';
   if (host.includes('amazon')) return 'Amazon';
   if (host.includes('flipkart')) return 'Flipkart';
   if (host.includes('myntra')) return 'Myntra';
@@ -177,6 +178,12 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
   let returnable = false;
   let returnDays: number | undefined;
 
+  // YouTube videos don't have prices or return policies - handle them specially
+  const isYouTube = sourcePlatform === 'YouTube';
+  if (isYouTube) {
+    returnable = false;
+  }
+
   try {
     const response = await fetch(url, {
       method: 'GET',
@@ -192,9 +199,12 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
     if (response.ok) {
       const html = await response.text();
       const metas = getMetas(html);
-      const returnPolicy = parseReturnPolicy(html);
-      returnable = returnPolicy.returnable;
-      returnDays = returnPolicy.returnDays;
+
+      if (!isYouTube) {
+        const returnPolicy = parseReturnPolicy(html);
+        returnable = returnPolicy.returnable;
+        returnDays = returnPolicy.returnDays;
+      }
 
       const ogTitle = getMetaValue(metas, ['og:title', 'twitter:title']);
       if (ogTitle) title = cleanText(ogTitle);
@@ -209,52 +219,54 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
         }
       }
 
-      const directPrice = getMetaValue(metas, ['product:price:amount', 'og:price:amount', 'twitter:data1', 'price']);
-      const directCurrency = getMetaValue(metas, ['product:price:currency', 'og:price:currency', 'currency']);
+      if (!isYouTube) {
+        const directPrice = getMetaValue(metas, ['product:price:amount', 'og:price:amount', 'twitter:data1', 'price']);
+        const directCurrency = getMetaValue(metas, ['product:price:currency', 'og:price:currency', 'currency']);
 
-      if (directPrice) price = parsePrice(directPrice);
-      if (directCurrency) currency = directCurrency.toUpperCase();
+        if (directPrice) price = parsePrice(directPrice);
+        if (directCurrency) currency = directCurrency.toUpperCase();
 
-      if (price <= 0) {
-        const jsonLdNodes = extractJsonLd(html);
-        const productNode = findProductNode(jsonLdNodes);
-        if (productNode) {
-          const productName = typeof productNode.name === 'string' ? productNode.name : '';
-          if (productName) title = cleanText(productName);
+        if (price <= 0) {
+          const jsonLdNodes = extractJsonLd(html);
+          const productNode = findProductNode(jsonLdNodes);
+          if (productNode) {
+            const productName = typeof productNode.name === 'string' ? productNode.name : '';
+            if (productName) title = cleanText(productName);
 
-          const offers = productNode.offers as unknown;
-          if (offers && typeof offers === 'object') {
-            const offer = Array.isArray(offers) ? offers[0] : offers;
-            if (offer && typeof offer === 'object') {
-              const offerObj = offer as Record<string, unknown>;
-              const offerPrice = String(offerObj.price ?? '').trim();
-              const offerCurrency = String(offerObj.priceCurrency ?? '').trim();
-              if (offerPrice) price = parsePrice(offerPrice);
-              if (offerCurrency) currency = offerCurrency.toUpperCase();
+            const offers = productNode.offers as unknown;
+            if (offers && typeof offers === 'object') {
+              const offer = Array.isArray(offers) ? offers[0] : offers;
+              if (offer && typeof offer === 'object') {
+                const offerObj = offer as Record<string, unknown>;
+                const offerPrice = String(offerObj.price ?? '').trim();
+                const offerCurrency = String(offerObj.priceCurrency ?? '').trim();
+                if (offerPrice) price = parsePrice(offerPrice);
+                if (offerCurrency) currency = offerCurrency.toUpperCase();
+              }
             }
           }
         }
-      }
 
-      if (price <= 0) {
-        const structuredPrice =
-          extractMatch(html, /"priceAmount"\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/i) ||
-          extractMatch(html, /class=["'][^"']*a-price-whole[^"']*["'][^>]*>\s*([^<]+)/i) ||
-          extractMatch(html, /class=["'][^"']*a-offscreen[^"']*["'][^>]*>\s*\u20B9\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
-        if (structuredPrice) {
-          price = parsePrice(structuredPrice);
-          currency = 'INR';
-        }
-      }
-
-      if (price <= 0) {
-        const pageText = html.slice(0, 200000);
-        const rupeeMatch = pageText.match(/(?:\u20B9|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
-        if (rupeeMatch?.[1]) {
-          const parsed = parsePrice(rupeeMatch[1]);
-          if (parsed >= 10) {
-            price = parsed;
+        if (price <= 0) {
+          const structuredPrice =
+            extractMatch(html, /"priceAmount"\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/i) ||
+            extractMatch(html, /class=["'][^"']*a-price-whole[^"']*["'][^>]*>\s*([^<]+)/i) ||
+            extractMatch(html, /class=["'][^"']*a-offscreen[^"']*["'][^>]*>\s*\u20B9\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
+          if (structuredPrice) {
+            price = parsePrice(structuredPrice);
             currency = 'INR';
+          }
+        }
+
+        if (price <= 0) {
+          const pageText = html.slice(0, 200000);
+          const rupeeMatch = pageText.match(/(?:\u20B9|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+          if (rupeeMatch?.[1]) {
+            const parsed = parsePrice(rupeeMatch[1]);
+            if (parsed >= 10) {
+              price = parsed;
+              currency = 'INR';
+            }
           }
         }
       }

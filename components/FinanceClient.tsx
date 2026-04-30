@@ -101,7 +101,12 @@ type FinanceOp =
   | { op: 'add_buy_item'; url: string; notes?: string }
   | { op: 'remove_buy_item'; itemId: string }
   | { op: 'move_buy_item'; itemId: string; direction: 'up' | 'down' }
-  | { op: 'mark_buy_item_bought'; itemId: string; category?: ExpenseCategory; subCategory?: string };
+  | { op: 'mark_buy_item_bought'; itemId: string; category?: ExpenseCategory; subCategory?: string }
+  | { op: 'remove_need_item'; itemId: string }
+  | { op: 'move_need_item'; itemId: string; direction: 'up' | 'down' }
+  | { op: 'mark_need_item_bought'; itemId: string; category?: ExpenseCategory; subCategory?: string }
+  | { op: 'move_to_need_list'; itemId: string }
+  | { op: 'move_to_buy_list'; itemId: string };
 
 function createExpenseForm(): ExpenseFormState {
   return {
@@ -394,20 +399,35 @@ function BuyRow({
   index,
   length,
   affordable,
+  isDragging,
   onMove,
   onRemove,
   onBought,
+  onDragStart,
+  onDragEnd,
 }: {
   item: BuyListItem;
   index: number;
   length: number;
   affordable: boolean;
+  isDragging: boolean;
   onMove: (id: string, direction: 'up' | 'down') => void;
   onRemove: (id: string) => void;
   onBought: (id: string) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
 }) {
   return (
-    <li className={`lift-card flex-col items-start ${affordable ? 'ring-2 ring-emerald-300' : ''} sm:flex-row`}>
+    <li
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
+      onDragEnd={onDragEnd}
+      className={`lift-card flex-col items-start sm:flex-row select-none transition-all duration-200 cursor-grab active:cursor-grabbing
+        ${affordable ? 'ring-2 ring-emerald-300' : ''}
+        ${isDragging ? 'opacity-30 scale-[0.97] shadow-none pointer-events-none' : 'opacity-100 scale-100'}
+      `}
+    >
+      <div className="mr-2 self-center text-duored-muted/50 text-lg shrink-0 hidden sm:block" aria-hidden>⠿</div>
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <ItemAvatar title={item.title} imageUrl={item.imageUrl} />
         <div className="min-w-0 flex-1">
@@ -1031,6 +1051,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [predictedFilter, setPredictedFilter] = useState<FilterState>(createPredictedFilter);
   const [actualFilter, setActualFilter] = useState<FilterState>(createActualFilter);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
+  const [wishlistDrag, setWishlistDrag] = useState<{ itemId: string; fromList: 'need' | 'buy' } | null>(null);
+  const [wishlistDropTarget, setWishlistDropTarget] = useState<'need' | 'buy' | null>(null);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [draggedExpenseId, setDraggedExpenseId] = useState<string | null>(null);
   const [dragOverCategory, setDragOverCategory] = useState<ExpenseCategory | null>(null);
@@ -1441,82 +1463,234 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
           </section>
 
           <section className="card-panel">
+            <h2 className="section-title">Actually Need</h2>
+            <p className="mb-3 text-sm font-semibold text-duored-muted">
+              Items you genuinely need. Drag to Priority list below if it can wait.
+            </p>
+            <div
+              className={`relative min-h-[72px] rounded-xl p-1 transition-all duration-200
+                ${wishlistDropTarget === 'need' && wishlistDrag?.fromList === 'buy'
+                  ? 'ring-2 ring-indigo-400 bg-indigo-50/60 shadow-inner'
+                  : ''}
+              `}
+              onDragOver={(e) => { if (wishlistDrag?.fromList === 'buy') e.preventDefault(); }}
+              onDragEnter={(e) => { e.preventDefault(); if (wishlistDrag?.fromList === 'buy') setWishlistDropTarget('need'); }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setWishlistDropTarget(null); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const src = wishlistDrag;
+                setWishlistDropTarget(null);
+                setWishlistDrag(null);
+                if (!src || src.fromList !== 'buy') return;
+                runMutation(
+                  { op: 'move_to_need_list', itemId: src.itemId },
+                  (current) => {
+                    const item = current.buyList.find((entry) => entry.id === src.itemId);
+                    if (!item) return current;
+                    return {
+                      ...current,
+                      buyList: current.buyList.filter((entry) => entry.id !== src.itemId),
+                      needList: [item, ...current.needList],
+                    };
+                  },
+                );
+              }}
+            >
+              {wishlistDropTarget === 'need' && wishlistDrag?.fromList === 'buy' && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-xl">
+                  <span className="animate-bounce text-sm font-bold text-indigo-600 bg-white/90 rounded-full px-4 py-2 shadow-lg ring-1 ring-indigo-300">
+                    ↑ Drop here to mark as Actually Need
+                  </span>
+                </div>
+              )}
+              {state.needList.length === 0 && wishlistDropTarget !== 'need' ? (
+                <p className="px-1 py-2 font-semibold text-duored-muted">
+                  No items yet. Drag from Priority buy list below or add via the link form above.
+                </p>
+              ) : (
+                <ol className={`space-y-2 ${wishlistDropTarget === 'need' ? 'opacity-40' : ''} transition-opacity duration-200`}>
+                  {state.needList.map((item, index) => (
+                    <BuyRow
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      length={state.needList.length}
+                      affordable={affordableSet.has(item.id)}
+                      isDragging={wishlistDrag?.itemId === item.id}
+                      onDragStart={() => setWishlistDrag({ itemId: item.id, fromList: 'need' })}
+                      onDragEnd={() => { setWishlistDrag(null); setWishlistDropTarget(null); }}
+                      onMove={(itemId, direction) =>
+                        runMutation(
+                          { op: 'move_need_item', itemId, direction },
+                          (current) => {
+                            const idx = current.needList.findIndex((entry) => entry.id === itemId);
+                            if (idx === -1) return current;
+                            const target = direction === 'up' ? Math.max(0, idx - 1) : Math.min(current.needList.length - 1, idx + 1);
+                            if (target === idx) return current;
+                            const next = [...current.needList];
+                            const [moved] = next.splice(idx, 1);
+                            next.splice(target, 0, moved);
+                            return { ...current, needList: next };
+                          },
+                        )
+                      }
+                      onRemove={(itemId) =>
+                        runMutation(
+                          { op: 'remove_need_item', itemId },
+                          (current) => ({ ...current, needList: current.needList.filter((entry) => entry.id !== itemId) }),
+                        )
+                      }
+                      onBought={(itemId) =>
+                        runMutation(
+                          { op: 'mark_need_item_bought', itemId, category: 'maintenance' },
+                          (current) => {
+                            const item = current.needList.find((entry) => entry.id === itemId);
+                            if (!item) return current;
+                            const nextExpense: ExpenseEntry = {
+                              id: `optimistic-${item.id}`,
+                              title: item.title,
+                              amount: item.price,
+                              bucket: 'actual',
+                              category: 'maintenance',
+                              cadence: 'one-time',
+                              spentOn: new Date().toISOString(),
+                              notes: [item.notes, item.sourcePlatform ? `Bought via ${item.sourcePlatform}` : '', getReturnLabel(item)].filter(Boolean).join(' | '),
+                              imageUrl: item.imageUrl,
+                              sourceUrl: item.url,
+                              sourcePlatform: item.sourcePlatform,
+                            };
+                            return {
+                              ...current,
+                              needList: current.needList.filter((entry) => entry.id !== itemId),
+                              expenses: [nextExpense, ...current.expenses],
+                            };
+                          },
+                        )
+                      }
+                    />
+                  ))}
+                </ol>
+              )}
+            </div>
+          </section>
+
+          <section className="card-panel">
             <h2 className="section-title">Priority buy list</h2>
             <p className="mb-3 text-sm font-semibold text-duored-muted">
-              Top items have higher priority. Green-outline rows are affordable this month based on your remaining income.
+              Top items have higher priority. Green-outline rows are affordable this month. Drag items to Actually Need above.
             </p>
-            {state.buyList.length === 0 ? (
-              <p className="font-semibold text-duored-muted">No items yet. Add your first product link above.</p>
-            ) : (
-              <ol className="space-y-2">
-                {state.buyList.map((item, index) => (
-                  <BuyRow
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    length={state.buyList.length}
-                    affordable={affordableSet.has(item.id)}
-                    onMove={(itemId, direction) =>
-                      runMutation(
-                        { op: 'move_buy_item', itemId, direction },
-                        (current) => {
-                          const index = current.buyList.findIndex((entry) => entry.id === itemId);
-                          if (index === -1) return current;
-                          const target =
-                            direction === 'up'
-                              ? Math.max(0, index - 1)
-                              : Math.min(current.buyList.length - 1, index + 1);
-                          if (target === index) return current;
-                          const nextBuyList = [...current.buyList];
-                          const [item] = nextBuyList.splice(index, 1);
-                          nextBuyList.splice(target, 0, item);
-                          return { ...current, buyList: nextBuyList };
-                        },
-                      )
-                    }
-                    onRemove={(itemId) =>
-                      runMutation(
-                        { op: 'remove_buy_item', itemId },
-                        (current) => ({ ...current, buyList: current.buyList.filter((entry) => entry.id !== itemId) }),
-                      )
-                    }
-                    onBought={(itemId) =>
-                      runMutation(
-                        { op: 'mark_buy_item_bought', itemId, category: 'maintenance' },
-                        (current) => {
-                          const item = current.buyList.find((entry) => entry.id === itemId);
-                          if (!item) return current;
-                          const nextExpense: ExpenseEntry = {
-                            id: `optimistic-${item.id}`,
-                            title: item.title,
-                            amount: item.price,
-                            bucket: 'actual',
-                            category: 'maintenance',
-                            cadence: 'one-time',
-                            spentOn: new Date().toISOString(),
-                            notes: [
-                              item.notes,
-                              item.sourcePlatform ? `Bought via ${item.sourcePlatform}` : '',
-                              getReturnLabel(item),
-                            ]
-                              .filter(Boolean)
-                              .join(' | '),
-                            imageUrl: item.imageUrl,
-                            sourceUrl: item.url,
-                            sourcePlatform: item.sourcePlatform,
-                          };
-                          return {
-                            ...current,
-                            buyList: current.buyList.filter((entry) => entry.id !== itemId),
-                            expenses: [nextExpense, ...current.expenses],
-                          };
-                        },
-                      )
-                    }
-                  />
-                ))}
-              </ol>
-            )}
+            <div
+              className={`relative min-h-[72px] rounded-xl p-1 transition-all duration-200
+                ${wishlistDropTarget === 'buy' && wishlistDrag?.fromList === 'need'
+                  ? 'ring-2 ring-blue-400 bg-blue-50/60 shadow-inner'
+                  : ''}
+              `}
+              onDragOver={(e) => { if (wishlistDrag?.fromList === 'need') e.preventDefault(); }}
+              onDragEnter={(e) => { e.preventDefault(); if (wishlistDrag?.fromList === 'need') setWishlistDropTarget('buy'); }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setWishlistDropTarget(null); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const src = wishlistDrag;
+                setWishlistDropTarget(null);
+                setWishlistDrag(null);
+                if (!src || src.fromList !== 'need') return;
+                runMutation(
+                  { op: 'move_to_buy_list', itemId: src.itemId },
+                  (current) => {
+                    const item = current.needList.find((entry) => entry.id === src.itemId);
+                    if (!item) return current;
+                    return {
+                      ...current,
+                      needList: current.needList.filter((entry) => entry.id !== src.itemId),
+                      buyList: [item, ...current.buyList],
+                    };
+                  },
+                );
+              }}
+            >
+              {wishlistDropTarget === 'buy' && wishlistDrag?.fromList === 'need' && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-xl">
+                  <span className="animate-bounce text-sm font-bold text-blue-600 bg-white/90 rounded-full px-4 py-2 shadow-lg ring-1 ring-blue-300">
+                    ↓ Drop here to move to Priority list
+                  </span>
+                </div>
+              )}
+              {state.buyList.length === 0 && wishlistDropTarget !== 'buy' ? (
+                <p className="px-1 py-2 font-semibold text-duored-muted">No items yet. Add your first product link above.</p>
+              ) : (
+                <ol className={`space-y-2 ${wishlistDropTarget === 'buy' ? 'opacity-40' : ''} transition-opacity duration-200`}>
+                  {state.buyList.map((item, index) => (
+                    <BuyRow
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      length={state.buyList.length}
+                      affordable={affordableSet.has(item.id)}
+                      isDragging={wishlistDrag?.itemId === item.id}
+                      onDragStart={() => setWishlistDrag({ itemId: item.id, fromList: 'buy' })}
+                      onDragEnd={() => { setWishlistDrag(null); setWishlistDropTarget(null); }}
+                      onMove={(itemId, direction) =>
+                        runMutation(
+                          { op: 'move_buy_item', itemId, direction },
+                          (current) => {
+                            const index = current.buyList.findIndex((entry) => entry.id === itemId);
+                            if (index === -1) return current;
+                            const target =
+                              direction === 'up'
+                                ? Math.max(0, index - 1)
+                                : Math.min(current.buyList.length - 1, index + 1);
+                            if (target === index) return current;
+                            const nextBuyList = [...current.buyList];
+                            const [item] = nextBuyList.splice(index, 1);
+                            nextBuyList.splice(target, 0, item);
+                            return { ...current, buyList: nextBuyList };
+                          },
+                        )
+                      }
+                      onRemove={(itemId) =>
+                        runMutation(
+                          { op: 'remove_buy_item', itemId },
+                          (current) => ({ ...current, buyList: current.buyList.filter((entry) => entry.id !== itemId) }),
+                        )
+                      }
+                      onBought={(itemId) =>
+                        runMutation(
+                          { op: 'mark_buy_item_bought', itemId, category: 'maintenance' },
+                          (current) => {
+                            const item = current.buyList.find((entry) => entry.id === itemId);
+                            if (!item) return current;
+                            const nextExpense: ExpenseEntry = {
+                              id: `optimistic-${item.id}`,
+                              title: item.title,
+                              amount: item.price,
+                              bucket: 'actual',
+                              category: 'maintenance',
+                              cadence: 'one-time',
+                              spentOn: new Date().toISOString(),
+                              notes: [
+                                item.notes,
+                                item.sourcePlatform ? `Bought via ${item.sourcePlatform}` : '',
+                                getReturnLabel(item),
+                              ]
+                                .filter(Boolean)
+                                .join(' | '),
+                              imageUrl: item.imageUrl,
+                              sourceUrl: item.url,
+                              sourcePlatform: item.sourcePlatform,
+                            };
+                            return {
+                              ...current,
+                              buyList: current.buyList.filter((entry) => entry.id !== itemId),
+                              expenses: [nextExpense, ...current.expenses],
+                            };
+                          },
+                        )
+                      }
+                    />
+                  ))}
+                </ol>
+              )}
+            </div>
           </section>
         </>
       )}
