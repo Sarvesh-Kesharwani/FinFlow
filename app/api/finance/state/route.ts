@@ -34,6 +34,47 @@ function assertUrl(value: string): boolean {
   }
 }
 
+
+function productDuplicateKey(value: string): string {
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+    const path = parsed.pathname.replace(/\/+$/g, '');
+
+    const amazonId = path.match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:\/|$)/i)?.[1];
+    if (amazonId && host.includes('amazon')) return `amazon:${amazonId.toUpperCase()}`;
+
+    const flipkartPid = parsed.searchParams.get('pid');
+    if (flipkartPid && host.includes('flipkart')) return `flipkart:${flipkartPid.toUpperCase()}`;
+
+    const params = new URLSearchParams(parsed.search);
+    for (const key of Array.from(params.keys())) {
+      const lower = key.toLowerCase();
+      if (
+        lower.startsWith('utm_') ||
+        ['tag', 'ref', 'ref_', 'psc', 'spm', 'ascsubtag', 'linkcode', 'creative', 'camp'].includes(lower)
+      ) {
+        params.delete(key);
+      }
+    }
+
+    params.sort();
+    const query = params.toString();
+    return `${host}${path.toLowerCase()}${query ? `?${query}` : ''}`;
+  } catch {
+    return value.trim().toLowerCase();
+  }
+}
+
+function findDuplicateBuyItem(state: FinanceStore, url: string): BuyListItem | null {
+  const key = productDuplicateKey(url);
+  return (
+    [...state.buyList, ...state.needList, ...state.squidGameWinnerList].find(
+      (item) => productDuplicateKey(item.url) === key,
+    ) ?? null
+  );
+}
+
 function moveItem<T>(items: T[], from: number, to: number): T[] {
   const next = [...items];
   const [item] = next.splice(from, 1);
@@ -307,6 +348,8 @@ export async function POST(req: Request) {
     let currency = '';
 
     if (!url || !assertUrl(url)) return fail('A valid product URL is required');
+    const duplicate = findDuplicateBuyItem(state, url);
+    if (duplicate) return fail(`"${duplicate.title}" is already in your buy list.`, 409);
 
     const extracted = await extractProductDetails(url);
     if (!title) title = extracted.title;
