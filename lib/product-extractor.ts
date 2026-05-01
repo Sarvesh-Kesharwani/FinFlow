@@ -48,6 +48,16 @@ function getMetaValue(metas: Array<Record<string, string>>, keys: string[]): str
   return '';
 }
 
+function absolutizeUrl(value: string, baseUrl: URL): string {
+  const clean = cleanText(value);
+  if (!clean) return '';
+  try {
+    return new URL(clean, baseUrl).toString();
+  } catch {
+    return '';
+  }
+}
+
 function parsePrice(raw: string): number {
   if (!raw) return 0;
   const normalized = raw.replace(/[, ]/g, '').match(/(\d+(\.\d+)?)/);
@@ -101,6 +111,48 @@ function platformFromHost(hostname: string): string {
 function extractMatch(html: string, pattern: RegExp): string {
   const match = html.match(pattern);
   return match?.[1] ? cleanText(match[1]) : '';
+}
+
+function extractImageFromUnknown(value: unknown, baseUrl: URL): string {
+  if (typeof value === 'string') return absolutizeUrl(value, baseUrl);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const imageUrl = extractImageFromUnknown(item, baseUrl);
+      if (imageUrl) return imageUrl;
+    }
+  }
+  if (value && typeof value === 'object') {
+    const objectValue = value as Record<string, unknown>;
+    const fromUrl = extractImageFromUnknown(objectValue.url, baseUrl);
+    if (fromUrl) return fromUrl;
+    const fromContentUrl = extractImageFromUnknown(objectValue.contentUrl, baseUrl);
+    if (fromContentUrl) return fromContentUrl;
+  }
+  return '';
+}
+
+function extractProductImage(html: string, metas: Array<Record<string, string>>, productNode: Record<string, unknown> | null, baseUrl: URL): string {
+  const metaImage = getMetaValue(metas, ['og:image', 'og:image:secure_url', 'twitter:image', 'twitter:image:src', 'image']);
+  const fromMeta = absolutizeUrl(metaImage, baseUrl);
+  if (fromMeta) return fromMeta;
+
+  const fromJsonLd = extractImageFromUnknown(productNode?.image, baseUrl);
+  if (fromJsonLd) return fromJsonLd;
+
+  const directImage =
+    extractMatch(html, /id=["']landingImage["'][^>]*data-old-hires=["']([^"']+)["']/i) ||
+    extractMatch(html, /data-old-hires=["']([^"']+)["'][^>]*id=["']landingImage["']/i) ||
+    extractMatch(html, /id=["']landingImage["'][^>]*src=["']([^"']+)["']/i) ||
+    extractMatch(html, /<img[^>]+src=["']([^"']+)["'][^>]+(?:id=["']landingImage["']|data-a-image-name=["']landingImage["'])/i) ||
+    extractMatch(html, /"hiRes"\s*:\s*"([^"]+)"/i) ||
+    extractMatch(html, /"large"\s*:\s*"([^"]+)"/i);
+  const fromDirect = absolutizeUrl(directImage, baseUrl);
+  if (fromDirect) return fromDirect;
+
+  const dynamicImage = extractMatch(html, /data-a-dynamic-image=["']([^"']+)["']/i);
+  const decodedDynamicImage = cleanText(dynamicImage);
+  const dynamicMatch = decodedDynamicImage.match(/https?:\/\/[^"'\s]+?\.(?:jpg|jpeg|png|webp)/i);
+  return dynamicMatch ? absolutizeUrl(dynamicMatch[0], baseUrl) : '';
 }
 
 function titleFromUrl(url: URL): string {
@@ -247,7 +299,7 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
 
       const ogTitle = getMetaValue(metas, ['og:title', 'twitter:title']);
       if (ogTitle) title = cleanText(ogTitle);
-      imageUrl = getMetaValue(metas, ['og:image', 'twitter:image', 'image']);
+      imageUrl = absolutizeUrl(getMetaValue(metas, ['og:image', 'twitter:image', 'image']), parsedUrl);
 
       if (!ogTitle) {
         const domTitle =
@@ -258,6 +310,7 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
         }
       }
 
+      let productNode: Record<string, unknown> | null = null;
       if (!isYouTube) {
         const directPrice = getMetaValue(metas, ['product:price:amount', 'og:price:amount', 'twitter:data1', 'price']);
         const directCurrency = getMetaValue(metas, ['product:price:currency', 'og:price:currency', 'currency']);
@@ -267,7 +320,7 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
 
         if (price <= 0) {
           const jsonLdNodes = extractJsonLd(html);
-          const productNode = findProductNode(jsonLdNodes);
+          productNode = findProductNode(jsonLdNodes);
           if (productNode) {
             const productName = typeof productNode.name === 'string' ? productNode.name : '';
             if (productName) title = cleanText(productName);
@@ -284,6 +337,10 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
               }
             }
           }
+        }
+
+        if (!productNode) {
+          productNode = findProductNode(extractJsonLd(html));
         }
 
         if (price <= 0) {
@@ -308,6 +365,10 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
             }
           }
         }
+      }
+
+      if (!imageUrl) {
+        imageUrl = extractProductImage(html, metas, productNode, parsedUrl);
       }
     }
   } catch {
