@@ -12,6 +12,10 @@ const nunito = Nunito({ subsets: ['latin'], weight: ['400', '700', '800', '900']
 export const metadata: Metadata = {
   title: 'FinFlow',
   description: 'Duolingo-style personal finance manager with Google login and Drive sync.',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
