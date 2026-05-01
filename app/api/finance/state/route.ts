@@ -75,6 +75,34 @@ function findDuplicateBuyItem(state: FinanceStore, url: string): BuyListItem | n
   );
 }
 
+
+function allBuyItems(state: FinanceStore): BuyListItem[] {
+  return [...state.buyList, ...state.needList, ...state.squidGameWinnerList];
+}
+
+function withHydratedBuyItem(state: FinanceStore, itemId: string, extracted: Awaited<ReturnType<typeof extractProductDetails>>): FinanceStore {
+  function hydrate(item: BuyListItem): BuyListItem {
+    if (item.id !== itemId) return item;
+    return {
+      ...item,
+      imageUrl: item.imageUrl || extracted.imageUrl || undefined,
+      price: item.price > 0 ? item.price : extracted.price,
+      currency: item.currency || extracted.currency,
+      sourcePlatform: item.sourcePlatform || extracted.sourcePlatform,
+      returnable: item.returnable || extracted.returnable,
+      returnDays: item.returnDays ?? extracted.returnDays,
+      lastReturnableOn: item.lastReturnableOn ?? lastReturnableDate(extracted.returnDays),
+    };
+  }
+
+  return {
+    ...state,
+    buyList: state.buyList.map(hydrate),
+    needList: state.needList.map(hydrate),
+    squidGameWinnerList: state.squidGameWinnerList.map(hydrate),
+  };
+}
+
 function moveItem<T>(items: T[], from: number, to: number): T[] {
   const next = [...items];
   const [item] = next.splice(from, 1);
@@ -340,6 +368,29 @@ export async function POST(req: Request) {
     return persist({ ...state, expenses: [...fresh, ...state.expenses] });
   }
 
+
+  if (op === 'hydrate_buy_item_photos') {
+    const ids = new Set(
+      (Array.isArray(body.itemIds) ? body.itemIds : [])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 6),
+    );
+    if (ids.size === 0) return Response.json({ ok: true, state });
+
+    let next = state;
+    let changed = false;
+    for (const item of allBuyItems(state)) {
+      if (!ids.has(item.id) || item.imageUrl) continue;
+      const extracted = await extractProductDetails(item.url);
+      if (!extracted.imageUrl) continue;
+      next = withHydratedBuyItem(next, item.id, extracted);
+      changed = true;
+    }
+
+    return changed ? persist(next) : Response.json({ ok: true, state });
+  }
+
   if (op === 'add_buy_item') {
     const url = String(body.url ?? '').trim();
     let title = String(body.title ?? '').trim();
@@ -349,7 +400,12 @@ export async function POST(req: Request) {
 
     if (!url || !assertUrl(url)) return fail('A valid product URL is required');
     const duplicate = findDuplicateBuyItem(state, url);
-    if (duplicate) return fail(`"${duplicate.title}" is already in your buy list.`, 409);
+    if (duplicate) {
+      if (duplicate.imageUrl) return fail(`"${duplicate.title}" is already in your buy list.`, 409);
+      const extracted = await extractProductDetails(url);
+      if (!extracted.imageUrl) return fail(`"${duplicate.title}" is already in your buy list.`, 409);
+      return persist(withHydratedBuyItem(state, duplicate.id, extracted));
+    }
 
     const extracted = await extractProductDetails(url);
     if (!title) title = extracted.title;

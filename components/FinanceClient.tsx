@@ -98,6 +98,7 @@ type FinanceOp =
   | { op: 'move_expense'; expenseId: string; category: ExpenseCategory }
   | { op: 'clear_expenses'; bucket: ExpenseBucket }
   | { op: 'bulk_add_expenses'; expenses: unknown[] }
+  | { op: 'hydrate_buy_item_photos'; itemIds: string[] }
   | { op: 'add_buy_item'; url: string; notes?: string }
   | { op: 'remove_buy_item'; itemId: string }
   | { op: 'move_buy_item'; itemId: string; direction: 'up' | 'down' }
@@ -1135,6 +1136,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const dragOverCategoryRef = useRef<ExpenseCategory | null>(null);
   const nextDragPositionRef = useRef<{ x: number; y: number } | null>(null);
   const dragFrameRef = useRef<number | null>(null);
+  const hydratedPhotoIdsRef = useRef<Set<string>>(new Set());
   const [clearDialog, setClearDialog] = useState<ClearDialogState>(null);
   const [clearInput, setClearInput] = useState('');
 
@@ -1250,6 +1252,27 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       })
       .finally(() => setIsPending(false));
   }
+
+
+  useEffect(() => {
+    if (mode !== 'wishlist') return;
+
+    const missing = [...state.buyList, ...state.needList, ...state.squidGameWinnerList]
+      .filter((item) => !item.imageUrl && !hydratedPhotoIdsRef.current.has(item.id))
+      .slice(0, 6);
+    if (missing.length === 0) return;
+
+    for (const item of missing) {
+      hydratedPhotoIdsRef.current.add(item.id);
+    }
+    void mutateFinance({ op: 'hydrate_buy_item_photos', itemIds: missing.map((item) => item.id) })
+      .then((next) => setState(next))
+      .catch(() => {
+        for (const item of missing) {
+          hydratedPhotoIdsRef.current.delete(item.id);
+        }
+      });
+  }, [mode, state.buyList, state.needList, state.squidGameWinnerList]);
 
   function beginEditingExpense(item: ExpenseEntry) {
     setEditingExpenseId(item.id);
