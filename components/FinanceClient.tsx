@@ -239,6 +239,39 @@ function getReturnLabel(item: BuyListItem): string {
   return item.lastReturnableOn ? `Returnable: ${days}, last date ${item.lastReturnableOn}` : `Returnable: ${days}`;
 }
 
+function platformFromProductUrl(value: string): string {
+  try {
+    const host = new URL(value).hostname.replace(/^www\./, '').toLowerCase();
+    if (host.includes('amazon')) return 'Amazon';
+    if (host.includes('flipkart')) return 'Flipkart';
+    if (host.includes('myntra')) return 'Myntra';
+    if (host.includes('ajio')) return 'Ajio';
+    if (host.includes('meesho')) return 'Meesho';
+    if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube';
+    return host.split('.')[0] || 'Online Store';
+  } catch {
+    return 'Online Store';
+  }
+}
+
+function titleFromProductUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    const segments = url.pathname
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => decodeURIComponent(segment).replace(/[-_]+/g, ' ').trim())
+      .filter(Boolean);
+    const dpIndex = segments.findIndex((segment) => segment.toLowerCase() === 'dp');
+    if (dpIndex > 0) return segments[dpIndex - 1];
+    const productIndex = segments.findIndex((segment) => segment.toLowerCase() === 'p');
+    if (productIndex > 0) return segments[productIndex - 1];
+    return segments.at(-1)?.replace(/\.[a-z0-9]+$/i, '').trim() || 'Product';
+  } catch {
+    return 'Product';
+  }
+}
+
 async function mutateFinance(payload: FinanceOp): Promise<FinanceStore> {
   const res = await fetch('/api/finance/state', {
     method: 'POST',
@@ -1489,11 +1522,29 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
               className="btn-duored mt-3"
               disabled={isPending}
               onClick={() => {
-                runMutation({
-                  op: 'add_buy_item',
-                  url: buyForm.url,
-                  notes: buyForm.notes,
-                });
+                const url = buyForm.url.trim();
+                const notes = buyForm.notes.trim();
+                runMutation(
+                  {
+                    op: 'add_buy_item',
+                    url,
+                    notes,
+                  },
+                  (current) => {
+                    const item: BuyListItem = {
+                      id: `optimistic-buy-${Date.now()}`,
+                      title: titleFromProductUrl(url),
+                      url,
+                      price: 0,
+                      sourcePlatform: platformFromProductUrl(url),
+                      currency: 'INR',
+                      notes: notes || 'Fetching product details...',
+                      createdAt: new Date().toISOString(),
+                      returnable: false,
+                    };
+                    return { ...current, buyList: [...current.buyList, item] };
+                  },
+                );
                 setBuyForm({ url: '', notes: '' });
               }}
               type="button"

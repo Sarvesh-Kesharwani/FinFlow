@@ -8,6 +8,9 @@ export interface ProductDetails {
   returnDays?: number;
 }
 
+const PRODUCT_FETCH_TIMEOUT_MS = 3500;
+const MAX_PRODUCT_HTML_BYTES = 300000;
+
 function cleanText(value: string): string {
   return value
     .replace(/&amp;/g, '&')
@@ -145,6 +148,41 @@ function extractJsonLd(html: string): Array<Record<string, unknown>> {
   return out;
 }
 
+async function readLimitedText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return response.text();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = maxBytes - total;
+      const chunk = value.length > remaining ? value.slice(0, remaining) : value;
+      chunks.push(chunk);
+      total += chunk.length;
+      if (value.length > remaining) break;
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Response may already be fully consumed.
+    }
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return new TextDecoder().decode(bytes);
+}
+
 function findProductNode(nodes: Array<Record<string, unknown>>): Record<string, unknown> | null {
   const stack = [...nodes];
   while (stack.length > 0) {
@@ -193,11 +231,12 @@ export async function extractProductDetails(url: string): Promise<ProductDetails
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36',
         'accept-language': 'en-IN,en;q=0.9',
       },
+      signal: AbortSignal.timeout(PRODUCT_FETCH_TIMEOUT_MS),
       cache: 'no-store',
     });
 
     if (response.ok) {
-      const html = await response.text();
+      const html = await readLimitedText(response, MAX_PRODUCT_HTML_BYTES);
       const metas = getMetas(html);
 
       if (!isYouTube) {
