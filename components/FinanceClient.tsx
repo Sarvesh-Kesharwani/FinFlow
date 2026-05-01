@@ -431,11 +431,16 @@ function BuyRow({
   return (
     <li
       draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', item.id); } catch {}
+        onDragStart();
+      }}
       onDragEnd={onDragEnd}
       onDragOver={onItemDragOver ? (e) => {
         e.preventDefault();
         e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
         const rect = e.currentTarget.getBoundingClientRect();
         const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
         onItemDragOver(index, position);
@@ -463,7 +468,7 @@ function BuyRow({
         <div className="min-w-0 flex-1">
           <p className="font-extrabold text-duored-ink">{item.title}</p>
           <p className="mt-1 text-xs font-semibold text-duored-muted">Source: {item.sourcePlatform || 'Online Store'}</p>
-          <a href={item.url} target="_blank" rel="noreferrer" className="block truncate text-xs text-duored-link underline">
+          <a href={item.url} target="_blank" rel="noreferrer" draggable={false} className="block truncate text-xs text-duored-link underline">
             {item.url}
           </a>
           <p className="mt-1 text-xs font-bold text-duored-muted">{getReturnLabel(item)}</p>
@@ -1508,8 +1513,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
                   ? 'ring-2 ring-indigo-400 bg-indigo-50/60 shadow-inner'
                   : ''}
               `}
-              onDragOver={(e) => { if (wishlistDrag?.fromList === 'buy') e.preventDefault(); }}
-              onDragEnter={(e) => { e.preventDefault(); if (wishlistDrag?.fromList === 'buy') setWishlistDropTarget('need'); }}
+              onDragOver={(e) => { if (wishlistDrag?.fromList === 'buy') { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+              onDragEnter={(e) => { if (wishlistDrag?.fromList === 'buy') { e.preventDefault(); setWishlistDropTarget('need'); } }}
               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setWishlistDropTarget(null); }}
               onDrop={(e) => {
                 e.preventDefault();

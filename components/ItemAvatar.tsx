@@ -17,7 +17,7 @@ export function ItemAvatar({
     return (
       <div className={`overflow-hidden rounded-2xl border-2 border-duored-border bg-white ${sizeClass}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" />
+        <img src={imageUrl} alt={title} className="h-full w-full object-cover" loading="lazy" draggable={false} />
       </div>
     );
   }
