@@ -1,27 +1,58 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { FeatureRequestMenu } from '@/components/FeatureRequestMenu';
+import { FINANCE_WORKSPACE_TAB_EVENT } from '@/components/finance-events';
 
 const TABS = [
-  { href: '/', label: 'Dashboard', emoji: '💰' },
-  { href: '/wishlist', label: 'To Buy', emoji: '🛍️' },
-  { href: '/reports', label: 'Reports', emoji: '📈' },
-];
+  { mode: 'dashboard', href: '/', label: 'Dashboard', emoji: '$' },
+  { mode: 'wishlist', href: '/?tab=wishlist', label: 'To Buy', emoji: 'B' },
+  { mode: 'priority-picks', href: '/?tab=priority-picks', label: 'Priority Picks', emoji: 'P' },
+  { mode: 'reports', href: '/?tab=reports', label: 'Reports', emoji: 'R' },
+] as const;
+
+const ROUTE_TO_MODE: Record<string, (typeof TABS)[number]['mode']> = {
+  '/': 'dashboard',
+  '/wishlist': 'wishlist',
+  '/priority-picks': 'priority-picks',
+  '/reports': 'reports',
+};
+
+function isWorkspaceMode(value: string | null): value is (typeof TABS)[number]['mode'] {
+  return TABS.some((tab) => tab.mode === value);
+}
 
 export function NavTabs() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const queryTab = searchParams.get('tab');
+  const routeMode = pathname === '/' && isWorkspaceMode(queryTab) ? queryTab : ROUTE_TO_MODE[pathname] ?? 'dashboard';
+  const [optimisticMode, setOptimisticMode] = useState(routeMode);
+  const activeMode = pathname === '/' ? optimisticMode : routeMode;
+
+  useEffect(() => {
+    setOptimisticMode(routeMode);
+  }, [routeMode]);
 
   return (
     <nav className="flex flex-wrap gap-2">
       <FeatureRequestMenu />
       {TABS.map((tab) => {
-        const active = pathname === tab.href;
+        const active = activeMode === tab.mode;
         return (
           <Link
-            key={tab.href}
+            key={tab.mode}
             href={tab.href}
+            onClick={(event) => {
+              if (pathname !== '/' || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              setOptimisticMode(tab.mode);
+              window.history.pushState(null, '', tab.href);
+              localStorage.setItem('finance_workspace_tab', tab.mode);
+              window.dispatchEvent(new CustomEvent(FINANCE_WORKSPACE_TAB_EVENT, { detail: { mode: tab.mode } }));
+            }}
             className={[
               'btn-duo',
               active

@@ -2,43 +2,57 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FINANCE_CHANGED_EVENT } from '@/components/FinanceClient';
+import { FINANCE_CHANGED_EVENT, FINANCE_SYNC_STATUS_CACHE_KEY, FINANCE_SYNC_STATUS_EVENT } from '@/components/finance-events';
 
 type SyncState = 'loading' | 'synced' | 'unsynced' | 'syncing' | 'no-auth';
+type CachedSyncStatus = {
+  state: SyncState;
+  ready: boolean;
+  lastSynced: string | null;
+  checkedAt: number;
+};
 
 const PULLED_KEY = 'finance_drive_pulled';
+const SYNC_STALE_MS = 2 * 60_000;
+const INITIAL_VALIDATE_DELAY_MS = 900;
+
+function readCachedSyncStatus(): CachedSyncStatus | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const cached = JSON.parse(localStorage.getItem(FINANCE_SYNC_STATUS_CACHE_KEY) || 'null') as CachedSyncStatus | null;
+    if (!cached || typeof cached.checkedAt !== 'number') return null;
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function isStale(cached: CachedSyncStatus | null): boolean {
+  return !cached || Date.now() - cached.checkedAt > SYNC_STALE_MS;
+}
 
 export function SyncButton() {
   const router = useRouter();
-  const [state, setState] = useState<SyncState>('loading');
-  const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [state, setState] = useState<SyncState>(() => readCachedSyncStatus()?.state ?? 'loading');
+  const [lastSynced, setLastSynced] = useState<string | null>(() => readCachedSyncStatus()?.lastSynced ?? null);
   const syncingRef = useRef(false);
   const checkingRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
+  const lastCheckRef = useRef(readCachedSyncStatus()?.checkedAt ?? 0);
 
-  const checkSync = useCallback(async () => {
-    if (syncingRef.current || checkingRef.current) return;
-    checkingRef.current = true;
-
-    try {
-      const r = await fetch('/api/drive/sync');
-      if (r.status === 401) {
-        setState('no-auth');
-        return;
-      }
-      if (!r.ok) {
-        setState('unsynced');
-        return;
-      }
-      const data = await r.json();
-      setState(data.synced ? 'synced' : 'unsynced');
-      setLastSynced(data.updatedAt || null);
-    } catch {
-      setState('unsynced');
-    } finally {
-      checkingRef.current = false;
-    }
-  }, []);
+  function emitSyncReady(ready: boolean, nextState = state, syncedAt = lastSynced) {
+    lastCheckRef.current = Date.now();
+    localStorage.setItem(
+      FINANCE_SYNC_STATUS_CACHE_KEY,
+      JSON.stringify({
+        state: nextState,
+        ready,
+        lastSynced: syncedAt,
+        checkedAt: lastCheckRef.current,
+      } satisfies CachedSyncStatus),
+    );
+    window.dispatchEvent(new CustomEvent(FINANCE_SYNC_STATUS_EVENT, { detail: { ready } }));
+  }
 
   const pushSync = useCallback(
     async (background = false) => {
@@ -51,26 +65,33 @@ export function SyncButton() {
         const r = await fetch('/api/drive/sync', { method: 'POST' });
         if (r.status === 401) {
           setState('no-auth');
+          emitSyncReady(true, 'no-auth', null);
           return;
         }
         if (!r.ok) {
           setState('unsynced');
+          emitSyncReady(false, 'unsynced', null);
           return;
         }
         const data = await r.json();
         if (data.initialized || data.driveWins || data.seededFromLocal) {
           sessionStorage.setItem(PULLED_KEY, '1');
-          setLastSynced(data.updatedAt || new Date().toISOString());
+          const syncedAt = data.updatedAt || new Date().toISOString();
+          setLastSynced(syncedAt);
           setState('synced');
+          emitSyncReady(true, 'synced', syncedAt);
           if (data.replacedLocal) {
             router.refresh();
           }
           return;
         }
-        setLastSynced(data.updatedAt || new Date().toISOString());
+        const syncedAt = data.updatedAt || new Date().toISOString();
+        setLastSynced(syncedAt);
         setState('synced');
+        emitSyncReady(true, 'synced', syncedAt);
       } catch {
         setState('unsynced');
+        emitSyncReady(false, 'unsynced', null);
       } finally {
         syncingRef.current = false;
       }
@@ -78,9 +99,52 @@ export function SyncButton() {
     [router],
   );
 
+  const checkSync = useCallback(async () => {
+    if (syncingRef.current || checkingRef.current) return;
+    checkingRef.current = true;
+
+    try {
+      const r = await fetch('/api/drive/sync');
+      if (r.status === 401) {
+        setState('no-auth');
+        emitSyncReady(true, 'no-auth', null);
+        return;
+      }
+      if (!r.ok) {
+        setState('unsynced');
+        emitSyncReady(false, 'unsynced', null);
+        return;
+      }
+      const data = await r.json();
+      if (!data.synced && data.driveHasData && !data.localHasData) {
+        void pushSync(true);
+        return;
+      }
+      const nextState = data.synced ? 'synced' : 'unsynced';
+      const syncedAt = data.updatedAt || null;
+      setState(nextState);
+      setLastSynced(syncedAt);
+      emitSyncReady(Boolean(data.initialized), nextState, syncedAt);
+    } catch {
+      setState('unsynced');
+      emitSyncReady(false, 'unsynced', null);
+    } finally {
+      checkingRef.current = false;
+    }
+  }, [pushSync]);
+
   useEffect(() => {
+    const cached = readCachedSyncStatus();
+    if (cached) {
+      setState(cached.state);
+      setLastSynced(cached.lastSynced);
+      emitSyncReady(cached.ready, cached.state, cached.lastSynced);
+    }
+
     if (sessionStorage.getItem(PULLED_KEY)) {
-      void checkSync();
+      if (isStale(cached)) {
+        window.setTimeout(() => void checkSync(), INITIAL_VALIDATE_DELAY_MS);
+      }
       return;
     }
 
@@ -88,24 +152,28 @@ export function SyncButton() {
       .then((r) => {
         if (r.status === 401) {
           setState('no-auth');
+          emitSyncReady(true, 'no-auth', null);
           return;
         }
         if (!r.ok) {
           setState('unsynced');
+          emitSyncReady(false, 'unsynced', null);
           return;
         }
         sessionStorage.setItem(PULLED_KEY, '1');
-        void checkSync();
-        router.refresh();
+        setState('synced');
+        setLastSynced(null);
+        emitSyncReady(true, 'synced', null);
+        window.setTimeout(() => void checkSync(), INITIAL_VALIDATE_DELAY_MS);
       })
       .catch(() => void checkSync());
-  }, [checkSync, router]);
+  }, [checkSync]);
 
   useEffect(() => {
     const onFinanceChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ autoSync?: boolean }>).detail;
-      setLastSynced(null);
       setState('unsynced');
+      emitSyncReady(false, 'unsynced', null);
 
       if (detail?.autoSync) {
         if (syncTimerRef.current) {
@@ -131,8 +199,17 @@ export function SyncButton() {
 
   useEffect(() => {
     if (state === 'no-auth') return;
-    const id = setInterval(() => void checkSync(), 30_000);
-    return () => clearInterval(id);
+    function checkIfStale() {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastCheckRef.current > SYNC_STALE_MS) void checkSync();
+    }
+
+    window.addEventListener('focus', checkIfStale);
+    document.addEventListener('visibilitychange', checkIfStale);
+    return () => {
+      window.removeEventListener('focus', checkIfStale);
+      document.removeEventListener('visibilitychange', checkIfStale);
+    };
   }, [checkSync, state]);
 
   if (state === 'no-auth') return null;

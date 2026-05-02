@@ -170,6 +170,15 @@ function titleFromUrl(url: URL): string {
     if (productSlug) return cleanText(productSlug);
   }
 
+  const flipkartProductIndex = segments.findIndex((segment) => segment.toLowerCase() === 'p');
+  if (flipkartProductIndex > 0) {
+    const productSlug = segments[flipkartProductIndex - 1]
+      .replace(/[-_]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (productSlug) return cleanText(productSlug);
+  }
+
   const segment = segments.at(-1);
   if (!segment) return 'Product';
   const clean = segment.replace(/[-_]+/g, ' ').replace(/\.[a-z0-9]+$/i, '').trim();

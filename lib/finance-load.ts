@@ -20,9 +20,11 @@ export async function loadFinanceState(): Promise<FinanceStore> {
     if (!drive) return cookieStore;
     return {
       monthlyIncome: drive.monthlyIncome,
+      priorityPicksBudget: drive.priorityPicksBudget,
       expenses: drive.expenses,
       buyList: drive.buyList,
       needList: drive.needList,
+      squidGameWinnerList: drive.squidGameWinnerList,
       requests: drive.requests,
     };
   } catch {

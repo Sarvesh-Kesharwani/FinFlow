@@ -117,6 +117,12 @@ export function normalizeFinanceStore(store: Partial<FinanceStore> | null | unde
       .map((item) => normalizeBuyListItem(item))
       .filter((item): item is BuyListItem => !!item),
   );
+  const normalizedSquidGameWinnerList = uniqueById(
+    (store?.squidGameWinnerList ?? [])
+      .map((item) => normalizeBuyListItem(item))
+      .filter((item): item is BuyListItem => !!item),
+  );
+  const winnerIds = new Set(normalizedSquidGameWinnerList.map((item) => item.id));
   const normalizedRequests = uniqueById(
     (store?.requests ?? [])
       .map((item) => normalizeRequest(item))
@@ -125,9 +131,11 @@ export function normalizeFinanceStore(store: Partial<FinanceStore> | null | unde
 
   return {
     monthlyIncome: normalizeMoney(store?.monthlyIncome),
+    priorityPicksBudget: normalizeMoney(store?.priorityPicksBudget),
     expenses: normalizedExpenses,
-    buyList: normalizedBuyList,
+    buyList: normalizedBuyList.filter((item) => !winnerIds.has(item.id)),
     needList: normalizedNeedList,
+    squidGameWinnerList: normalizedSquidGameWinnerList,
     requests: normalizedRequests,
   };
 }

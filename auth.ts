@@ -45,7 +45,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             'https://www.googleapis.com/auth/drive.appdata',
           ].join(' '),
           access_type: 'offline',
-          prompt: 'consent',
+          prompt: process.env.GOOGLE_AUTH_PROMPT ?? 'select_account',
         },
       },
     }),
@@ -55,7 +55,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // On first sign-in, persist Google tokens into JWT.
       if (account) {
         token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
+        token.refreshToken = account.refresh_token ?? token.refreshToken;
         // account.expires_at is a Unix timestamp in seconds.
         token.accessTokenExpires = account.expires_at
           ? account.expires_at * 1000

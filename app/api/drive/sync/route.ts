@@ -14,13 +14,33 @@ function sameStore(a: FinanceStore, b: FinanceStore): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function hasFinanceData(store: FinanceStore): boolean {
+  return (
+    store.monthlyIncome > 0 ||
+    store.priorityPicksBudget > 0 ||
+    store.expenses.length > 0 ||
+    store.buyList.length > 0 ||
+    store.needList.length > 0 ||
+    store.squidGameWinnerList.length > 0 ||
+    store.requests.length > 0
+  );
+}
+
 export async function GET() {
   const session = await getSession();
   if (!session?.accessToken) {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  let cookieStore: FinanceStore = { monthlyIncome: 0, expenses: [], buyList: [], needList: [], requests: [] };
+  let cookieStore: FinanceStore = {
+    monthlyIncome: 0,
+    priorityPicksBudget: 0,
+    expenses: [],
+    buyList: [],
+    needList: [],
+    squidGameWinnerList: [],
+    requests: [],
+  };
   let driveData = null;
   let localMeta = { updatedAt: null as string | null, dirty: false };
   try {
@@ -34,12 +54,30 @@ export async function GET() {
   }
 
   const driveStore: FinanceStore = driveData
-    ? { monthlyIncome: driveData.monthlyIncome, expenses: driveData.expenses, buyList: driveData.buyList, needList: driveData.needList, requests: driveData.requests }
-    : { monthlyIncome: 0, expenses: [], buyList: [], needList: [], requests: [] };
+    ? {
+        monthlyIncome: driveData.monthlyIncome,
+        priorityPicksBudget: driveData.priorityPicksBudget,
+        expenses: driveData.expenses,
+        buyList: driveData.buyList,
+        needList: driveData.needList,
+        squidGameWinnerList: driveData.squidGameWinnerList,
+        requests: driveData.requests,
+      }
+    : {
+        monthlyIncome: 0,
+        priorityPicksBudget: 0,
+        expenses: [],
+        buyList: [],
+        needList: [],
+        squidGameWinnerList: [],
+        requests: [],
+      };
 
   return Response.json({
     driveItems: driveStore.buyList.length,
     localItems: cookieStore.buyList.length,
+    driveHasData: hasFinanceData(driveStore),
+    localHasData: hasFinanceData(cookieStore),
     initialized: await hasDriveSyncHydrated(),
     synced: sameStore(cookieStore, driveStore) && !localMeta.dirty,
     updatedAt: driveData?.updatedAt ?? null,
@@ -52,20 +90,38 @@ export async function POST() {
     return Response.json({ error: 'Not signed in' }, { status: 401 });
   }
 
-  const cookieStore = await getCookieFinanceStore();
-  const localMeta = await getCookieSyncMeta();
+  const [cookieStore, localMeta, hydrated] = await Promise.all([
+    getCookieFinanceStore(),
+    getCookieSyncMeta(),
+    hasDriveSyncHydrated(),
+  ]);
 
   try {
     const driveData = await readDriveFinanceStore(session.accessToken);
 
-    if (driveData && !localMeta.dirty) {
+    if (driveData) {
       const driveStore: FinanceStore = {
         monthlyIncome: driveData.monthlyIncome,
+        priorityPicksBudget: driveData.priorityPicksBudget,
         expenses: driveData.expenses,
         buyList: driveData.buyList,
         needList: driveData.needList,
+        squidGameWinnerList: driveData.squidGameWinnerList,
         requests: driveData.requests,
       };
+      if (hydrated && localMeta.dirty) {
+        const syncedAt = await writeDriveFinanceStore(session.accessToken, cookieStore);
+        await markCookieStoreSynced(syncedAt);
+        await markDriveSyncHydrated();
+
+        return Response.json({
+          ok: true,
+          initialized: true,
+          seededFromLocal: true,
+          updatedAt: syncedAt,
+        });
+      }
+
       const replacedLocal = !sameStore(cookieStore, driveStore);
 
       await setCookieFinanceStore(driveStore);
@@ -116,9 +172,11 @@ export async function PUT() {
 
   await setCookieFinanceStore({
     monthlyIncome: driveData.monthlyIncome,
+    priorityPicksBudget: driveData.priorityPicksBudget,
     expenses: driveData.expenses,
     buyList: driveData.buyList,
     needList: driveData.needList,
+    squidGameWinnerList: driveData.squidGameWinnerList,
     requests: driveData.requests,
   });
   await markCookieStoreSynced(driveData.updatedAt);

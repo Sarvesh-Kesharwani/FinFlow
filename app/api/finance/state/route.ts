@@ -1,5 +1,6 @@
 import {
   getCookieFinanceStore,
+  hasDriveSyncHydrated,
   markCookieStoreDirty,
   setCookieFinanceStore,
 } from '@/lib/finance-store';
@@ -33,7 +34,6 @@ function assertUrl(value: string): boolean {
     return false;
   }
 }
-
 
 function productDuplicateKey(value: string): string {
   try {
@@ -74,7 +74,6 @@ function findDuplicateBuyItem(state: FinanceStore, url: string): BuyListItem | n
     ) ?? null
   );
 }
-
 
 function allBuyItems(state: FinanceStore): BuyListItem[] {
   return [...state.buyList, ...state.needList, ...state.squidGameWinnerList];
@@ -173,9 +172,11 @@ async function loadAuthoritativeState(): Promise<FinanceStore> {
     if (drive) {
       return {
         monthlyIncome: drive.monthlyIncome,
+        priorityPicksBudget: drive.priorityPicksBudget,
         expenses: drive.expenses,
         buyList: drive.buyList,
         needList: drive.needList,
+        squidGameWinnerList: drive.squidGameWinnerList,
         requests: drive.requests,
       };
     }
@@ -201,6 +202,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (session?.accessToken && !(await hasDriveSyncHydrated())) {
+    return fail('Google Drive sync must complete before making changes.', 409);
+  }
+
   const state = await loadMutationState();
   let body: Record<string, unknown>;
   try {
@@ -216,6 +222,15 @@ export async function POST(req: Request) {
       {
         ...state,
         monthlyIncome: normalizeMoney(body.monthlyIncome),
+      },
+    );
+  }
+
+  if (op === 'set_priority_picks_budget') {
+    return persist(
+      {
+        ...state,
+        priorityPicksBudget: normalizeMoney(body.amount),
       },
     );
   }
@@ -368,7 +383,6 @@ export async function POST(req: Request) {
     return persist({ ...state, expenses: [...fresh, ...state.expenses] });
   }
 
-
   if (op === 'hydrate_buy_item_photos') {
     const ids = new Set(
       (Array.isArray(body.itemIds) ? body.itemIds : [])
@@ -415,10 +429,13 @@ export async function POST(req: Request) {
 
     if (!title) return fail('Could not extract product title from this URL');
 
-    // YouTube videos are free - allow price of 0 for them
-    if (price <= 0 && sourcePlatform !== 'YouTube') {
-      return fail('Could not extract product price from this URL. Please try another product link.');
-    }
+    const existingNotes = String(body.notes ?? '').trim();
+    const notes = [
+      existingNotes,
+      price <= 0 && sourcePlatform !== 'YouTube' ? 'Price could not be extracted automatically.' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
 
     const item: BuyListItem = {
       id: id(),
@@ -427,7 +444,7 @@ export async function POST(req: Request) {
       price,
       sourcePlatform,
       currency,
-      notes: String(body.notes ?? '').trim() || undefined,
+      notes: notes || undefined,
       createdAt: new Date().toISOString(),
       imageUrl: sanitizeImageUrl(body.imageUrl) ?? extracted.imageUrl,
       returnable: extracted.returnable,
@@ -512,6 +529,49 @@ export async function POST(req: Request) {
     if (fromIndex === -1) return fail('Item not found', 404);
     if (fromIndex === targetIndex) return Response.json({ ok: true, state });
     return persist({ ...state, buyList: moveItem(state.buyList, fromIndex, targetIndex) });
+  }
+
+  if (op === 'move_priority_pick_item') {
+    const itemId = String(body.itemId ?? '').trim();
+    const targetList = String(body.targetList ?? '').trim();
+    if (!itemId) return fail('Item id is required');
+    if (targetList !== 'buy' && targetList !== 'winner') return fail('Target list is required');
+
+    const sourceList = state.squidGameWinnerList.some((entry) => entry.id === itemId) ? 'winner' : 'buy';
+    const fromItems = sourceList === 'winner' ? state.squidGameWinnerList : state.buyList;
+    const item = fromItems.find((entry) => entry.id === itemId);
+    if (!item) return fail('Item not found', 404);
+
+    const toItems = targetList === 'winner' ? state.squidGameWinnerList : state.buyList;
+    const withoutSource = fromItems.filter((entry) => entry.id !== itemId);
+    const withoutDuplicateTarget = toItems.filter((entry) => entry.id !== itemId);
+    const targetIndex = Math.max(
+      0,
+      Math.min(withoutDuplicateTarget.length, Number(body.targetIndex ?? withoutDuplicateTarget.length)),
+    );
+
+    if (sourceList === targetList) {
+      const fromIndex = fromItems.findIndex((entry) => entry.id === itemId);
+      if (fromIndex === -1) return fail('Item not found', 404);
+      const sameListTarget = Math.max(0, Math.min(withoutSource.length, Number(body.targetIndex ?? fromIndex)));
+      if (fromIndex === sameListTarget || fromIndex + 1 === sameListTarget) return Response.json({ ok: true, state });
+      const next = [...withoutSource];
+      next.splice(sameListTarget > fromIndex ? sameListTarget - 1 : sameListTarget, 0, item);
+      return persist({
+        ...state,
+        buyList: targetList === 'buy' ? next : state.buyList,
+        squidGameWinnerList: targetList === 'winner' ? next : state.squidGameWinnerList,
+      });
+    }
+
+    const nextTarget = [...withoutDuplicateTarget];
+    nextTarget.splice(targetIndex, 0, item);
+
+    return persist({
+      ...state,
+      buyList: targetList === 'buy' ? nextTarget : withoutSource,
+      squidGameWinnerList: targetList === 'winner' ? nextTarget : withoutSource,
+    });
   }
 
   if (op === 'move_to_need_list') {

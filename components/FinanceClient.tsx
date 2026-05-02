@@ -3,6 +3,8 @@
 import { type Dispatch, type PointerEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { ItemAvatar } from '@/components/ItemAvatar';
 import { CsvImportButton } from '@/components/CsvImportButton';
+import { FINANCE_CHANGED_EVENT } from '@/components/finance-events';
+import { useFinanceSyncReady } from '@/components/useFinanceSyncReady';
 import { summarizeFinance } from '@/lib/finance-math';
 import {
   EXPENSE_CADENCE_OPTIONS,
@@ -16,7 +18,6 @@ import {
   type FinanceStore,
 } from '@/lib/finance-types';
 
-const FINANCE_CHANGED_EVENT = 'finance-state-changed';
 const CUSTOM_FREQ_PREFIX = 'custom-frequency:';
 
 type ExpenseFormMode = 'one-time' | 'repetitive';
@@ -67,6 +68,7 @@ type ExpenseDragStart = Omit<ExpenseDragState, 'item'> & {
 };
 
 type FinanceOp =
+  | { op: 'set_priority_picks_budget'; amount: number }
   | {
       op: 'add_expense';
       title: string;
@@ -108,7 +110,23 @@ type FinanceOp =
   | { op: 'move_need_item'; itemId: string; direction: 'up' | 'down' }
   | { op: 'mark_need_item_bought'; itemId: string; category?: ExpenseCategory; subCategory?: string }
   | { op: 'move_to_need_list'; itemId: string }
-  | { op: 'move_to_buy_list'; itemId: string };
+  | { op: 'move_to_buy_list'; itemId: string }
+  | { op: 'move_priority_pick_item'; itemId: string; targetList: PriorityListKey; targetIndex: number };
+
+type PriorityListKey = 'buy' | 'winner';
+
+type PriorityDragState = {
+  itemId: string;
+  fromList: PriorityListKey;
+};
+
+type PriorityDropIndicator = {
+  list: PriorityListKey;
+  index: number;
+  position: 'before' | 'after';
+} | null;
+
+export type FinanceMode = 'dashboard' | 'wishlist' | 'priority-picks' | 'reports';
 
 function createExpenseForm(): ExpenseFormState {
   return {
@@ -205,6 +223,10 @@ function formatMoney(amount: number, currency = 'INR'): string {
     currency: normalized,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+function formatBuyItemPrice(item: BuyListItem): string {
+  return item.price > 0 ? formatMoney(item.price, item.currency || 'INR') : 'Price pending';
 }
 
 function parseCustomFrequency(notes?: string): string {
@@ -309,6 +331,68 @@ function SummaryCards({
         </div>
       ))}
     </section>
+  );
+}
+
+function ReportsView({ state, summary }: { state: FinanceStore; summary: ReturnType<typeof summarizeFinance> }) {
+  const sorted = Object.entries(
+    state.expenses.reduce<Record<string, number>>((acc, expense) => {
+      acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <>
+      <section className="space-y-1">
+        <h1 className="text-3xl font-extrabold text-duored-deep">Reports</h1>
+        <p className="font-semibold text-duored-muted">Quick monthly outlook for expected vs current spending.</p>
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <article className="card-3d card-green">
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Monthly Income</p>
+          <p className="mt-2 text-2xl font-extrabold">{formatMoney(state.monthlyIncome)}</p>
+        </article>
+        <article className="card-3d card-amber">
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Expected / Month</p>
+          <p className="mt-2 text-2xl font-extrabold">{formatMoney(summary.monthlyExpectedExpenses)}</p>
+        </article>
+        <article className="card-3d card-rose">
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Spent This Month</p>
+          <p className="mt-2 text-2xl font-extrabold">{formatMoney(summary.currentMonthSpent)}</p>
+        </article>
+        <article className="card-3d card-green">
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Can Buy This Month</p>
+          <p className="mt-2 text-2xl font-extrabold">{summary.canBuyCountThisMonth} items</p>
+        </article>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-1">
+        <article className="card-3d card-green">
+          <p className="text-xs uppercase tracking-[0.18em] opacity-75">Remaining This Month</p>
+          <p className="mt-2 text-2xl font-extrabold">{formatMoney(summary.currentMonthRemaining)}</p>
+        </article>
+      </section>
+
+      <section className="card-panel">
+        <h2 className="section-title">Category totals</h2>
+        {sorted.length === 0 ? (
+          <p className="font-semibold text-duored-muted">No expenses recorded yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {sorted.map(([category, amount]) => (
+              <li key={category} className="lift-card">
+                <span className="font-extrabold capitalize text-duored-ink">
+                  {isExpenseCategory(category) ? categoryLabel(category) : category}
+                </span>
+                <span className="font-extrabold text-duored-deep">{formatMoney(amount)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
   );
 }
 
@@ -510,7 +594,7 @@ function BuyRow({
         </div>
       </div>
       <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-        <span className="chip-price">{formatMoney(item.price, item.currency || 'INR')}</span>
+        <span className="chip-price">{formatBuyItemPrice(item)}</span>
         <button className="btn-duored px-3 py-1 text-xs" onClick={() => onBought(item.id)} type="button">
           Mark Bought
         </button>
@@ -527,6 +611,115 @@ function BuyRow({
         <button className="chip-danger" onClick={() => onRemove(item.id)} type="button">
           Remove
         </button>
+      </div>
+    </li>
+  );
+}
+
+function getPriorityList(store: FinanceStore, list: PriorityListKey): BuyListItem[] {
+  return list === 'winner' ? store.squidGameWinnerList : store.buyList;
+}
+
+function applyPriorityMove(
+  store: FinanceStore,
+  itemId: string,
+  targetList: PriorityListKey,
+  targetIndex: number,
+): FinanceStore {
+  const sourceList: PriorityListKey = store.squidGameWinnerList.some((item) => item.id === itemId) ? 'winner' : 'buy';
+  const sourceItems = getPriorityList(store, sourceList);
+  const item = sourceItems.find((entry) => entry.id === itemId);
+  if (!item) return store;
+
+  const nextBuyList = store.buyList.filter((entry) => entry.id !== itemId);
+  const nextWinnerList = store.squidGameWinnerList.filter((entry) => entry.id !== itemId);
+  const targetItems = targetList === 'winner' ? nextWinnerList : nextBuyList;
+  let insertionIndex = Math.max(0, Math.min(targetItems.length, targetIndex));
+
+  if (sourceList === targetList) {
+    const fromIndex = sourceItems.findIndex((entry) => entry.id === itemId);
+    if (targetIndex > fromIndex) insertionIndex = Math.max(0, insertionIndex - 1);
+  }
+
+  targetItems.splice(insertionIndex, 0, item);
+
+  return {
+    ...store,
+    buyList: targetList === 'buy' ? targetItems : nextBuyList,
+    squidGameWinnerList: targetList === 'winner' ? targetItems : nextWinnerList,
+  };
+}
+
+function PriorityPickRow({
+  item,
+  index,
+  list,
+  isDragging,
+  dropPosition,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+}: {
+  item: BuyListItem;
+  index: number;
+  list: PriorityListKey;
+  isDragging: boolean;
+  dropPosition?: 'before' | 'after' | null;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: (index: number, position: 'before' | 'after') => void;
+  onDragLeave: () => void;
+  onDrop: (index: number, position: 'before' | 'after') => void;
+}) {
+  return (
+    <li
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move';
+        try {
+          event.dataTransfer.setData('text/plain', item.id);
+        } catch {}
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'move';
+        const rect = event.currentTarget.getBoundingClientRect();
+        onDragOver(index, event.clientY < rect.top + rect.height / 2 ? 'before' : 'after');
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) onDragLeave();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        onDrop(index, event.clientY < rect.top + rect.height / 2 ? 'before' : 'after');
+      }}
+      className={`lift-card relative select-none cursor-grab items-start active:cursor-grabbing
+        ${isDragging ? 'scale-[0.98] opacity-30 shadow-none' : 'opacity-100'}
+        ${dropPosition === 'before' ? 'before:absolute before:left-3 before:right-3 before:-top-1 before:h-1 before:rounded-full before:bg-duored-main before:shadow-[0_0_12px_rgba(216,54,72,0.45)]' : ''}
+        ${dropPosition === 'after' ? 'after:absolute after:left-3 after:right-3 after:-bottom-1 after:h-1 after:rounded-full after:bg-duored-main after:shadow-[0_0_12px_rgba(216,54,72,0.45)]' : ''}
+      `}
+      data-priority-list={list}
+    >
+      <div className="pt-2 text-duored-muted/50" aria-hidden>
+        ::
+      </div>
+      <ItemAvatar title={item.title} imageUrl={item.imageUrl} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-extrabold text-duored-ink">{item.title}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <span className="chip-price">{formatBuyItemPrice(item)}</span>
+          <span className="text-xs font-bold text-duored-muted">{item.sourcePlatform || 'Online Store'}</span>
+        </div>
+        <a href={item.url} target="_blank" rel="noreferrer" draggable={false} className="mt-1 block truncate text-xs text-duored-link underline">
+          {item.url}
+        </a>
       </div>
     </li>
   );
@@ -1110,10 +1303,12 @@ function ExpenseEditor({
   );
 }
 
-export function FinanceClient({ initialState, mode }: { initialState: FinanceStore; mode: 'dashboard' | 'wishlist' }) {
+export function FinanceClient({ initialState, mode }: { initialState: FinanceStore; mode: FinanceMode }) {
   const [state, setState] = useState(initialState);
   const [error, setError] = useState('');
   const [isPending, setIsPending] = useState(false);
+  const syncReady = useFinanceSyncReady();
+  const [budgetDraft, setBudgetDraft] = useState(String(initialState.priorityPicksBudget || ''));
   const summary = useMemo(() => summarizeFinance(state), [state]);
   const affordableSet = useMemo(() => new Set(summary.affordableItemIds), [summary.affordableItemIds]);
 
@@ -1127,6 +1322,9 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [wishlistDrag, setWishlistDrag] = useState<{ itemId: string; fromList: 'need' | 'buy' } | null>(null);
   const [wishlistDropTarget, setWishlistDropTarget] = useState<'need' | 'buy' | null>(null);
   const [buyDropIndicator, setBuyDropIndicator] = useState<{ index: number; position: 'before' | 'after' } | null>(null);
+  const [priorityDrag, setPriorityDrag] = useState<PriorityDragState | null>(null);
+  const [priorityDropTarget, setPriorityDropTarget] = useState<PriorityListKey | null>(null);
+  const [priorityDropIndicator, setPriorityDropIndicator] = useState<PriorityDropIndicator>(null);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [draggedExpenseId, setDraggedExpenseId] = useState<string | null>(null);
   const [dragOverCategory, setDragOverCategory] = useState<ExpenseCategory | null>(null);
@@ -1238,6 +1436,11 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   }, [dragOverCategory, dragState]);
 
   function runMutation(payload: FinanceOp, optimistic?: (current: FinanceStore) => FinanceStore) {
+    if (!syncReady) {
+      setError('Google Drive sync is still loading. Changes are locked until sync completes.');
+      return;
+    }
+
     setError('');
     const snapshot = state;
     if (optimistic) {
@@ -1253,9 +1456,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       .finally(() => setIsPending(false));
   }
 
-
   useEffect(() => {
-    if (mode !== 'wishlist') return;
+    if (!syncReady || (mode !== 'wishlist' && mode !== 'priority-picks')) return;
 
     const missing = [...state.buyList, ...state.needList, ...state.squidGameWinnerList]
       .filter((item) => !item.imageUrl && !hydratedPhotoIdsRef.current.has(item.id))
@@ -1265,14 +1467,38 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     for (const item of missing) {
       hydratedPhotoIdsRef.current.add(item.id);
     }
-    void mutateFinance({ op: 'hydrate_buy_item_photos', itemIds: missing.map((item) => item.id) })
-      .then((next) => setState(next))
-      .catch(() => {
-        for (const item of missing) {
-          hydratedPhotoIdsRef.current.delete(item.id);
-        }
-      });
-  }, [mode, state.buyList, state.needList, state.squidGameWinnerList]);
+    runMutation({ op: 'hydrate_buy_item_photos', itemIds: missing.map((item) => item.id) });
+  }, [mode, state.buyList, state.needList, state.squidGameWinnerList, syncReady]);
+
+  function savePriorityBudget() {
+    const amount = Number(budgetDraft || '0');
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError('Budget amount must be zero or more');
+      setBudgetDraft(String(state.priorityPicksBudget || ''));
+      return;
+    }
+    if (amount === state.priorityPicksBudget) return;
+    runMutation(
+      { op: 'set_priority_picks_budget', amount },
+      (current) => ({ ...current, priorityPicksBudget: amount }),
+    );
+  }
+
+  function movePriorityPick(itemId: string, targetList: PriorityListKey, targetIndex: number) {
+    runMutation(
+      { op: 'move_priority_pick_item', itemId, targetList, targetIndex },
+      (current) => applyPriorityMove(current, itemId, targetList, targetIndex),
+    );
+  }
+
+  function handlePriorityContainerDrop(targetList: PriorityListKey) {
+    const src = priorityDrag;
+    setPriorityDropTarget(null);
+    setPriorityDropIndicator(null);
+    setPriorityDrag(null);
+    if (!src) return;
+    movePriorityPick(src.itemId, targetList, getPriorityList(state, targetList).length);
+  }
 
   function beginEditingExpense(item: ExpenseEntry) {
     setEditingExpenseId(item.id);
@@ -1409,7 +1635,13 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   }
 
   return (
-    <div className={`space-y-6 ${dragState ? 'expense-board-dragging' : ''}`}>
+    <div className={`relative space-y-6 ${dragState ? 'expense-board-dragging' : ''}`}>
+      {!syncReady && (
+        <div className="sticky top-20 z-20 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3 text-sm font-extrabold text-amber-800 shadow-card">
+          Google Drive sync is loading. Editing is locked until Drive state is ready.
+        </div>
+      )}
+      {!syncReady && <div className="absolute inset-0 z-10 cursor-wait rounded-chonk bg-white/35" aria-hidden />}
       {dragState && (
         <div
           ref={dragOverlayRef}
@@ -1451,6 +1683,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       {error && <p className="rounded-xl border-2 border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{error}</p>}
 
       {mode === 'dashboard' && <SummaryCards summary={summary} />}
+
+      {mode === 'reports' && <ReportsView state={state} summary={summary} />}
 
       {mode === 'dashboard' && (
         <>
@@ -1517,6 +1751,144 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
             dragOverCategory={dragOverCategory}
             onPointerDragStart={startExpenseDrag}
           />
+        </>
+      )}
+
+      {mode === 'priority-picks' && (
+        <>
+          <section className="card-panel">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="section-title mb-1">Total Expense Budget</h2>
+                <p className="text-sm font-semibold text-duored-muted">
+                  This budget is saved with your finance state and ready for later calculations.
+                </p>
+              </div>
+              <label className="w-full max-w-sm">
+                <span className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-duored-muted">Budget amount</span>
+                <input
+                  className="text-input w-full text-lg font-extrabold"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={budgetDraft}
+                  onChange={(event) => setBudgetDraft(event.target.value)}
+                  onBlur={savePriorityBudget}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  placeholder="0"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-2">
+            {([
+              {
+                key: 'buy' as const,
+                title: 'To Buy Items',
+                items: state.buyList,
+                empty: 'No to-buy items left here.',
+              },
+              {
+                key: 'winner' as const,
+                title: 'SquidGame Winner Items',
+                items: state.squidGameWinnerList,
+                empty: 'Drag winners here from To Buy Items.',
+              },
+            ]).map((list) => (
+              <div key={list.key} className="card-panel min-h-[32rem]">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h2 className="section-title mb-0">{list.title}</h2>
+                  <span className="chip-soft">{list.items.length}</span>
+                </div>
+                <div
+                  className={`relative max-h-[68vh] min-h-[26rem] overflow-y-auto rounded-xl p-1 transition-all duration-200
+                    ${priorityDropTarget === list.key ? 'bg-duored-soft/50 ring-2 ring-duored-main/40' : ''}
+                  `}
+                  onDragOver={(event) => {
+                    if (!priorityDrag) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDragEnter={(event) => {
+                    if (!priorityDrag) return;
+                    event.preventDefault();
+                    setPriorityDropTarget(list.key);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                      setPriorityDropTarget(null);
+                      setPriorityDropIndicator(null);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    handlePriorityContainerDrop(list.key);
+                  }}
+                >
+                  {list.items.length === 0 ? (
+                    <div className="flex min-h-[24rem] items-center justify-center rounded-xl border-2 border-dashed border-duored-border bg-white/60 px-4 text-center font-bold text-duored-muted">
+                      {list.empty}
+                    </div>
+                  ) : (
+                    <ol className="space-y-2">
+                      {list.items.map((item, index) => (
+                        <PriorityPickRow
+                          key={item.id}
+                          item={item}
+                          index={index}
+                          list={list.key}
+                          isDragging={priorityDrag?.itemId === item.id}
+                          dropPosition={
+                            priorityDropIndicator?.list === list.key &&
+                            priorityDropIndicator.index === index &&
+                            priorityDrag?.itemId !== item.id
+                              ? priorityDropIndicator.position
+                              : null
+                          }
+                          onDragStart={() => {
+                            setPriorityDrag({ itemId: item.id, fromList: list.key });
+                            setPriorityDropTarget(list.key);
+                          }}
+                          onDragEnd={() => {
+                            setPriorityDrag(null);
+                            setPriorityDropTarget(null);
+                            setPriorityDropIndicator(null);
+                          }}
+                          onDragOver={(idx, position) => {
+                            if (!priorityDrag || priorityDrag.itemId === item.id) return;
+                            setPriorityDropTarget(list.key);
+                            setPriorityDropIndicator((current) =>
+                              current?.list === list.key && current.index === idx && current.position === position
+                                ? current
+                                : { list: list.key, index: idx, position },
+                            );
+                          }}
+                          onDragLeave={() => {
+                            setPriorityDropIndicator((current) =>
+                              current?.list === list.key && current.index === index ? null : current,
+                            );
+                          }}
+                          onDrop={(idx, position) => {
+                            const src = priorityDrag;
+                            setPriorityDrag(null);
+                            setPriorityDropTarget(null);
+                            setPriorityDropIndicator(null);
+                            if (!src || src.itemId === item.id) return;
+                            movePriorityPick(src.itemId, list.key, position === 'before' ? idx : idx + 1);
+                          }}
+                        />
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              </div>
+            ))}
+          </section>
         </>
       )}
 
@@ -1870,5 +2242,3 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     </div>
   );
 }
-
-export { FINANCE_CHANGED_EVENT };

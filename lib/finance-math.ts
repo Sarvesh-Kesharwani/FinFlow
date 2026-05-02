@@ -44,7 +44,9 @@ function canAffordThisMonth(sortedByPriority: BuyListItem[], budget: number): st
   let running = 0;
 
   for (const item of sortedByPriority) {
-    const next = running + clampMoney(toNumber(item.price));
+    const itemPrice = clampMoney(toNumber(item.price));
+    if (itemPrice <= 0) continue;
+    const next = running + itemPrice;
     if (next > budget) break;
     running = next;
     affordable.push(item.id);

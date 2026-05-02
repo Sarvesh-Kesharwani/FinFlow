@@ -3,6 +3,11 @@
 import { signIn } from 'next-auth/react';
 import { useState } from 'react';
 
+function currentReturnPath(): string {
+  const path = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  return path.startsWith('/') ? path : '/';
+}
+
 export function SignInButton() {
   const [pending, setPending] = useState(false);
 
@@ -17,7 +22,7 @@ export function SignInButton() {
 
         try {
           await fetch('/api/auth/cleanup', { method: 'POST' });
-          await signIn('google', { redirectTo: '/' });
+          await signIn('google', { redirectTo: currentReturnPath() });
         } finally {
           setPending(false);
         }

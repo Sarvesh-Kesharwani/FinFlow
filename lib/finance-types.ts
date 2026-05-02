@@ -46,9 +46,11 @@ export interface FeatureRequestEntry {
 
 export interface FinanceStore {
   monthlyIncome: number;
+  priorityPicksBudget: number;
   expenses: ExpenseEntry[];
   buyList: BuyListItem[];
   needList: BuyListItem[];
+  squidGameWinnerList: BuyListItem[];
   requests: FeatureRequestEntry[];
 }
 
@@ -63,9 +65,11 @@ export interface FinanceSummary {
 
 export const DEFAULT_FINANCE_STORE: FinanceStore = {
   monthlyIncome: 0,
+  priorityPicksBudget: 0,
   expenses: [],
   buyList: [],
   needList: [],
+  squidGameWinnerList: [],
   requests: [],
 };
 
