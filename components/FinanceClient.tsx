@@ -4,7 +4,6 @@ import { type Dispatch, type PointerEvent, type ReactNode, type SetStateAction, 
 import { ItemAvatar } from '@/components/ItemAvatar';
 import { CsvImportButton } from '@/components/CsvImportButton';
 import { FINANCE_CHANGED_EVENT } from '@/components/finance-events';
-import { useFinanceSyncReady } from '@/components/useFinanceSyncReady';
 import { summarizeFinance } from '@/lib/finance-math';
 import {
   EXPENSE_CADENCE_OPTIONS,
@@ -1307,7 +1306,6 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [state, setState] = useState(initialState);
   const [error, setError] = useState('');
   const [isPending, setIsPending] = useState(false);
-  const syncReady = useFinanceSyncReady();
   const [budgetDraft, setBudgetDraft] = useState(String(initialState.priorityPicksBudget || ''));
   const summary = useMemo(() => summarizeFinance(state), [state]);
   const affordableSet = useMemo(() => new Set(summary.affordableItemIds), [summary.affordableItemIds]);
@@ -1436,11 +1434,6 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   }, [dragOverCategory, dragState]);
 
   function runMutation(payload: FinanceOp, optimistic?: (current: FinanceStore) => FinanceStore) {
-    if (!syncReady) {
-      setError('Google Drive sync is still loading. Changes are locked until sync completes.');
-      return;
-    }
-
     setError('');
     const snapshot = state;
     if (optimistic) {
@@ -1457,7 +1450,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   }
 
   useEffect(() => {
-    if (!syncReady || (mode !== 'wishlist' && mode !== 'priority-picks')) return;
+    if (mode !== 'wishlist' && mode !== 'priority-picks') return;
 
     const missing = [...state.buyList, ...state.needList, ...state.squidGameWinnerList]
       .filter((item) => !item.imageUrl && !hydratedPhotoIdsRef.current.has(item.id))
@@ -1468,7 +1461,7 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
       hydratedPhotoIdsRef.current.add(item.id);
     }
     runMutation({ op: 'hydrate_buy_item_photos', itemIds: missing.map((item) => item.id) });
-  }, [mode, state.buyList, state.needList, state.squidGameWinnerList, syncReady]);
+  }, [mode, state.buyList, state.needList, state.squidGameWinnerList]);
 
   function savePriorityBudget() {
     const amount = Number(budgetDraft || '0');
@@ -1636,12 +1629,6 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
 
   return (
     <div className={`relative space-y-6 ${dragState ? 'expense-board-dragging' : ''}`}>
-      {!syncReady && (
-        <div className="sticky top-20 z-20 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3 text-sm font-extrabold text-amber-800 shadow-card">
-          Google Drive sync is loading. Editing is locked until Drive state is ready.
-        </div>
-      )}
-      {!syncReady && <div className="absolute inset-0 z-10 cursor-wait rounded-chonk bg-white/35" aria-hidden />}
       {dragState && (
         <div
           ref={dragOverlayRef}

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { FINANCE_CHANGED_EVENT } from '@/components/finance-events';
-import { useFinanceSyncReady } from '@/components/useFinanceSyncReady';
 
 type FeatureRequestEntry = {
   id: string;
@@ -17,7 +16,6 @@ export function FeatureRequestMenu() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const syncReady = useFinanceSyncReady();
 
   async function loadRequests() {
     try {
@@ -47,10 +45,6 @@ export function FeatureRequestMenu() {
   }, []);
 
   async function mutate(payload: Record<string, unknown>) {
-    if (!syncReady) {
-      setError('Google Drive sync is still loading. Changes are locked until sync completes.');
-      return;
-    }
     setBusy(true);
     setError('');
     try {
@@ -97,13 +91,12 @@ export function FeatureRequestMenu() {
             <input
               className="text-input w-full"
               value={draft}
-              disabled={!syncReady}
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Add a request description"
             />
             <button
               className="btn-duored w-full"
-              disabled={busy || !syncReady}
+              disabled={busy}
               type="button"
               onClick={async () => {
                 const description = draft.trim();
@@ -117,7 +110,6 @@ export function FeatureRequestMenu() {
             >
               Add request
             </button>
-            {!syncReady && <p className="text-xs font-bold text-amber-700">Waiting for Google Drive sync before edits.</p>}
             {error && <p className="text-xs font-bold text-red-600">{error}</p>}
           </div>
 
@@ -132,7 +124,7 @@ export function FeatureRequestMenu() {
                     <button
                       className="chip-danger px-2 py-0.5 text-xs"
                       type="button"
-                      disabled={busy || !syncReady}
+                      disabled={busy}
                       onClick={() => void mutate({ op: 'remove_request', requestId: request.id })}
                     >
                       X

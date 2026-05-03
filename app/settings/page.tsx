@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session';
 import { getCookieFinanceStore } from '@/lib/finance-store';
 import { EmptyState } from '@/components/EmptyState';
 import { IncomeForm } from '@/components/IncomeForm';
+import { RestoreBackupButton } from '@/components/RestoreBackupButton';
 
 export default async function SettingsPage() {
   const session = await getSession();
@@ -26,6 +27,7 @@ export default async function SettingsPage() {
       </section>
 
       <IncomeForm initialIncome={state.monthlyIncome} />
+      <RestoreBackupButton />
     </div>
   );
 }

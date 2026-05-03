@@ -1,4 +1,4 @@
-import { readDriveFinanceStore, writeDriveFinanceStore } from '@/lib/finance-drive';
+import { readDriveFinanceStore, rotateDailyBackupIfStale, writeDriveFinanceStore } from '@/lib/finance-drive';
 import {
   getCookieFinanceStore,
   getCookieSyncMeta,
@@ -109,6 +109,11 @@ export async function POST() {
         squidGameWinnerList: driveData.squidGameWinnerList,
         requests: driveData.requests,
       };
+      try {
+        await rotateDailyBackupIfStale(session.accessToken, driveData);
+      } catch {
+        // backup rotation failure must not block sync
+      }
       if (hydrated && localMeta.dirty) {
         const syncedAt = await writeDriveFinanceStore(session.accessToken, cookieStore);
         await markCookieStoreSynced(syncedAt);

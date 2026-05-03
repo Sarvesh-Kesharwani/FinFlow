@@ -5,6 +5,7 @@ const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const SPACE = 'appDataFolder';
 const FILE_NAME = 'finance-manager-state.json';
+const BACKUP_FILE_NAME = 'finance-manager-state.backup.json';
 
 interface DriveFinanceData extends FinanceStore {
   updatedAt: string;
@@ -129,4 +130,67 @@ export async function writeDriveFinanceStore(accessToken: string, store: Finance
   });
   await uploadJsonFile(accessToken, FILE_NAME, body, { fileId: fileId ?? undefined, parents: [SPACE] });
   return updatedAt;
+}
+
+interface DriveBackupData extends FinanceStore {
+  backupAt: string;
+  sourceUpdatedAt: string | null;
+}
+
+export interface DriveFinanceBackup extends FinanceStore {
+  backupAt: string;
+  sourceUpdatedAt: string | null;
+}
+
+function utcDayKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+async function readBackupMeta(
+  accessToken: string,
+  fileId: string,
+): Promise<{ backupAt: string | null }> {
+  const data = await readFileJson<DriveBackupData>(accessToken, fileId);
+  if (!data) return { backupAt: null };
+  return { backupAt: data.backupAt ?? null };
+}
+
+export async function readDriveFinanceBackup(accessToken: string): Promise<DriveFinanceBackup | null> {
+  const fileId = await findFile(accessToken, BACKUP_FILE_NAME);
+  if (!fileId) return null;
+  const data = await readFileJson<DriveBackupData>(accessToken, fileId);
+  if (!data) return null;
+  return {
+    ...normalizeFinanceStore(data),
+    backupAt: data.backupAt ?? new Date(0).toISOString(),
+    sourceUpdatedAt: data.sourceUpdatedAt ?? null,
+  };
+}
+
+export async function rotateDailyBackupIfStale(
+  accessToken: string,
+  current: DriveFinanceState,
+): Promise<{ rotated: boolean; backupAt: string | null }> {
+  const todayKey = utcDayKey(new Date().toISOString());
+  const backupId = await findFile(accessToken, BACKUP_FILE_NAME);
+  if (backupId) {
+    const meta = await readBackupMeta(accessToken, backupId);
+    if (meta.backupAt && utcDayKey(meta.backupAt) === todayKey) {
+      return { rotated: false, backupAt: meta.backupAt };
+    }
+  }
+
+  const backupAt = new Date().toISOString();
+  const body = JSON.stringify({
+    ...normalizeFinanceStore(current),
+    backupAt,
+    sourceUpdatedAt: current.updatedAt ?? null,
+  } satisfies DriveBackupData);
+  await uploadJsonFile(accessToken, BACKUP_FILE_NAME, body, {
+    fileId: backupId ?? undefined,
+    parents: [SPACE],
+  });
+  return { rotated: true, backupAt };
 }
