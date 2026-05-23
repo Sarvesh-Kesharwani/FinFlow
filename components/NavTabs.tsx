@@ -9,6 +9,7 @@ import { FINANCE_WORKSPACE_TAB_EVENT } from '@/components/finance-events';
 const TABS = [
   { mode: 'dashboard', href: '/', label: 'Dashboard', emoji: '$' },
   { mode: 'wishlist', href: '/?tab=wishlist', label: 'To Buy', emoji: 'B' },
+  { mode: 'mobile-recharge', href: '/mobile-recharge', label: 'Mobile Recharge', shortLabel: 'Recharge', emoji: 'M' },
   { mode: 'priority-picks', href: '/?tab=priority-picks', label: 'Priority Picks', emoji: 'P' },
   { mode: 'reports', href: '/?tab=reports', label: 'Reports', emoji: 'R' },
 ] as const;
@@ -16,6 +17,7 @@ const TABS = [
 const ROUTE_TO_MODE: Record<string, (typeof TABS)[number]['mode']> = {
   '/': 'dashboard',
   '/wishlist': 'wishlist',
+  '/mobile-recharge': 'mobile-recharge',
   '/priority-picks': 'priority-picks',
   '/reports': 'reports',
 };
@@ -58,10 +60,12 @@ export function NavTabs() {
               active
                 ? 'bg-duored-main text-white shadow-duored'
                 : 'bg-white text-duored-ink border-2 border-duored-border shadow-card',
+              'px-3 text-xs sm:px-4 sm:text-sm',
             ].join(' ')}
           >
             <span aria-hidden>{tab.emoji}</span>
-            <span>{tab.label}</span>
+            <span className="hidden sm:inline">{tab.label}</span>
+            <span className="sm:hidden">{'shortLabel' in tab ? tab.shortLabel : tab.label}</span>
           </Link>
         );
       })}

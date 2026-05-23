@@ -1,0 +1,15 @@
+feat(mobile-recharge): add Airtel operator support and recharge functionality
+
+- Add shared MobilePlan type (types/mobile-plan.ts)
+- Create Airtel plans data library with 12 prepaid plans (lib/airtel-mobile-plans.ts)
+- Add Airtel plans API route (/api/mobile-recharge/airtel-plans)
+- Add operator switcher (Jio/Airtel) to MobileRechargeClient
+- Add mobile number input with validation
+- Add "Recharge Now" button that opens operator recharge page with number prefilled
+- Airtel recharge URL: https://www.airtel.in/recharge-online?mobile=<number>
+- Jio recharge URL: https://www.jio.com/selfcare/recharge/mobility/?number=<number>
+- Update Jio plans lib to use shared MobilePlan type
+- Update compare API to be operator-agnostic
+- Persist operator & mobile number selection in localStorage
+
+Co-authored-by: CommandCodeBot <noreply@commandcode.ai>
