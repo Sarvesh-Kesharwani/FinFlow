@@ -590,8 +590,7 @@ const PLATFORM_CONFIGS: Record<MarketPlatform, PlatformConfig> = {
   myntra: { platform: 'myntra', label: PLATFORM_LABELS.myntra, buildUrl: buildMyntraUrl, parse: parseMyntra },
 };
 
-async function searchPlatform(config: PlatformConfig, query: string, filters: Required<MarketSearchFilters>) {
-  const url = config.buildUrl(query, filters);
+async function fetchPlatformProducts(config: PlatformConfig, url: string, filters: Required<MarketSearchFilters>) {
   try {
     const response = await fetch(url, {
       method: 'GET',
@@ -607,48 +606,76 @@ async function searchPlatform(config: PlatformConfig, query: string, filters: Re
     });
 
     if (!response.ok) {
-      const error = `Search page returned ${response.status}`;
-      return {
-        products: [createSearchFallbackProduct(config, query, url, error)],
-        source: {
-          platform: config.platform,
-          label: config.label,
-          ok: false,
-          count: 1,
-          url,
-          error,
-        },
-      };
+      return { products: [] as MarketProduct[], ok: false, error: `Search page returned ${response.status}` };
     }
 
     const html = await readLimitedText(response, MAX_MARKET_HTML_BYTES);
     const products = applyFilters(config.parse(html, url), filters);
-    const error = products.length === 0 ? 'No parseable products matched these filters' : undefined;
     return {
-      products: products.length ? products : [createSearchFallbackProduct(config, query, url, error)],
+      products,
+      ok: true,
+      error: products.length === 0 ? 'No parseable products matched these filters' : undefined,
+    };
+  } catch (error) {
+    return {
+      products: [] as MarketProduct[],
+      ok: false,
+      error: error instanceof Error ? error.message : 'Search failed',
+    };
+  }
+}
+
+async function searchPlatform(config: PlatformConfig, query: string, filters: Required<MarketSearchFilters>) {
+  const url = config.buildUrl(query, filters);
+  const primary = await fetchPlatformProducts(config, url, filters);
+
+  if (primary.products.length > 0) {
+    return {
+      products: primary.products,
       source: {
         platform: config.platform,
         label: config.label,
         ok: true,
-        count: products.length || 1,
+        count: primary.products.length,
         url,
-        error,
-      },
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Search failed';
-    return {
-      products: [createSearchFallbackProduct(config, query, url, errorMessage)],
-      source: {
-        platform: config.platform,
-        label: config.label,
-        ok: false,
-        count: 1,
-        url,
-        error: errorMessage,
+        error: primary.error,
       },
     };
   }
+
+  if (filters.sortBy !== 'relevance') {
+    const retryFilters = { ...filters, sortBy: 'relevance' as const };
+    const retryUrl = config.buildUrl(query, retryFilters);
+    if (retryUrl !== url) {
+      const retry = await fetchPlatformProducts(config, retryUrl, filters);
+      if (retry.products.length > 0) {
+        return {
+          products: retry.products,
+          source: {
+            platform: config.platform,
+            label: config.label,
+            ok: true,
+            count: retry.products.length,
+            url: retryUrl,
+            error: primary.error ? `Sorted search failed; used default search instead.` : retry.error,
+          },
+        };
+      }
+    }
+  }
+
+  const error = primary.error ?? 'No parseable products matched these filters';
+  return {
+    products: [createSearchFallbackProduct(config, query, url, error)],
+    source: {
+      platform: config.platform,
+      label: config.label,
+      ok: false,
+      count: 1,
+      url,
+      error,
+    },
+  };
 }
 
 export async function searchMarketProducts(query: string, filters?: MarketSearchFilters): Promise<MarketSearchResponse> {
