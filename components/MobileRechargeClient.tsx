@@ -40,12 +40,20 @@ const TAB_STORAGE_KEY = 'finflow_mobile_recharge_tab';
 const SELECTED_STORAGE_KEY = 'finflow_mobile_recharge_selected';
 const REQUIREMENT_STORAGE_KEY = 'finflow_mobile_recharge_requirement';
 const OPERATOR_STORAGE_KEY = 'finflow_mobile_recharge_operator';
-const MOBILE_STORAGE_KEY = 'finflow_mobile_recharge_number';
 
 const PLAN_ENDPOINTS: Record<OperatorId, string> = {
   jio: '/api/mobile-recharge/jio-plans',
   airtel: '/api/mobile-recharge/airtel-plans',
 };
+
+type CustomFilterKey = 'sms' | 'voice' | 'data' | 'ott';
+
+const CUSTOM_FILTERS: Array<{ key: CustomFilterKey; label: string }> = [
+  { key: 'sms', label: 'SMS' },
+  { key: 'voice', label: 'Voice' },
+  { key: 'data', label: 'Data' },
+  { key: 'ott', label: 'OTT' },
+];
 
 function clean(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
@@ -78,16 +86,51 @@ function formatFetchedAt(value: string): string {
   return date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-function isValidMobile(value: string): boolean {
-  return /^[6-9]\d{9}$/.test(value.replace(/[^\d]/g, ''));
+function hasIncludedValue(value: string): boolean {
+  return Boolean(value.trim()) && !/^(no|none|na|n\/a|0)$/i.test(value.trim());
 }
 
-function getRechargeUrl(operator: string, mobileNumber: string): string {
-  const cleanNumber = mobileNumber.replace(/[^\d]/g, '');
-  if (operator === 'airtel') {
-    return `https://www.airtel.in/recharge-online?mobile=${cleanNumber}`;
-  }
-  return `https://www.jio.com/selfcare/recharge/mobility/?number=${cleanNumber}`;
+function hasData(plan: MobilePlan): boolean {
+  return hasIncludedValue(plan.highSpeedData) || hasIncludedValue(plan.totalData);
+}
+
+function hasVoice(plan: MobilePlan): boolean {
+  return hasIncludedValue(plan.voice);
+}
+
+function hasSms(plan: MobilePlan): boolean {
+  return hasIncludedValue(plan.sms);
+}
+
+function hasOtt(plan: MobilePlan): boolean {
+  return plan.subscriptions.some((subscription) => /(prime|hotstar|netflix|sonyliv|zee5|jiocinema|jio cinema|sun nxt|ott|amazon|disney)/i.test(subscription));
+}
+
+function dataScore(value: string): number {
+  const textValue = value.toLowerCase();
+  if (!textValue || /no|none|na|n\/a/.test(textValue)) return 0;
+  if (/unlimited/.test(textValue)) return 1_000_000;
+  const matches = Array.from(textValue.matchAll(/(\d+(?:\.\d+)?)\s*(tb|gb|mb)/gi));
+  if (!matches.length) return 0;
+  const multiplier = /\/\s*day|per\s*day|daily/.test(textValue) ? 1000 : 1;
+  return Math.max(
+    ...matches.map((match) => {
+      const amount = Number(match[1]);
+      const unit = match[2].toLowerCase();
+      const gb = unit === 'tb' ? amount * 1024 : unit === 'mb' ? amount / 1024 : amount;
+      return gb * multiplier;
+    }),
+  );
+}
+
+function planDataScore(plan: MobilePlan): number {
+  return Math.max(dataScore(plan.highSpeedData), dataScore(plan.totalData), dataScore(plan.description));
+}
+
+function planConditionText(plan: MobilePlan): string {
+  return [plan.category, plan.subCategory, plan.rechargeUrl ? 'Rechargeable from official source' : 'Open source to confirm rechargeability']
+    .filter(Boolean)
+    .join(' | ');
 }
 
 export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
@@ -98,9 +141,15 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
   const [operator, setOperator] = useState<string>('airtel');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
+  const [customMode, setCustomMode] = useState<'none' | 'data_desc'>('none');
+  const [customFilters, setCustomFilters] = useState<Record<CustomFilterKey, boolean>>({
+    sms: false,
+    voice: false,
+    data: false,
+    ott: false,
+  });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [requirement, setRequirement] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
   const [aiState, setAiState] = useState<AiState>({ status: 'idle' });
 
   useEffect(() => {
@@ -122,7 +171,6 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
       }
     }
     setRequirement(localStorage.getItem(REQUIREMENT_STORAGE_KEY) ?? '');
-    setMobileNumber(localStorage.getItem(MOBILE_STORAGE_KEY) ?? '');
   }, [operators]);
 
   useEffect(() => {
@@ -181,7 +229,6 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
   useEffect(() => { localStorage.setItem(OPERATOR_STORAGE_KEY, operator); }, [operator]);
   useEffect(() => { localStorage.setItem(SELECTED_STORAGE_KEY, JSON.stringify(selectedIds)); }, [selectedIds]);
   useEffect(() => { localStorage.setItem(REQUIREMENT_STORAGE_KEY, requirement); }, [requirement]);
-  useEffect(() => { localStorage.setItem(MOBILE_STORAGE_KEY, mobileNumber); }, [mobileNumber]);
 
   const operatorData = operatorResults[operator];
   const allPlans = operatorData?.plans ?? [];
@@ -190,15 +237,20 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
   const warnings = operatorData?.warnings ?? [];
   const isLoadingPlans = Boolean(loadingOperators[operator]);
 
-  const categories = useMemo(
+  const jioCategories = useMemo(
     () => ['All', ...Array.from(new Set(allPlans.map((plan) => plan.category))).sort((a, b) => a.localeCompare(b))],
     [allPlans],
   );
 
   const filteredPlans = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return allPlans.filter((plan) => {
+    const filtered = allPlans.filter((plan) => {
       const matchesCategory = category === 'All' || plan.category === category;
+      const matchesCustom =
+        (!customFilters.sms || hasSms(plan)) &&
+        (!customFilters.voice || hasVoice(plan)) &&
+        (!customFilters.data || hasData(plan)) &&
+        (!customFilters.ott || hasOtt(plan));
       const haystack = [
         plan.displayName,
         plan.category,
@@ -214,9 +266,15 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
       ]
         .join(' ')
         .toLowerCase();
-      return matchesCategory && (!needle || haystack.includes(needle));
+      return matchesCategory && matchesCustom && (!needle || haystack.includes(needle));
     });
-  }, [category, allPlans, query]);
+
+    if (customMode === 'data_desc') {
+      return [...filtered].sort((a, b) => planDataScore(b) - planDataScore(a) || a.price - b.price);
+    }
+
+    return filtered;
+  }, [category, allPlans, query, customFilters, customMode]);
 
   const selectedPlans = useMemo(
     () => selectedIds.map((id) => allPlans.find((plan) => plan.id === id)).filter((plan): plan is MobilePlan => Boolean(plan)),
@@ -231,13 +289,6 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
       current.includes(planId) ? current.filter((id) => id !== planId) : [...current, planId].slice(0, 8),
     );
     setAiState({ status: 'idle' });
-  }
-
-  const mobileReady = isValidMobile(mobileNumber);
-
-  function handleRecharge() {
-    if (!mobileReady) return;
-    window.open(getRechargeUrl(operator, mobileNumber), '_blank');
   }
 
   async function runAiCompare() {
@@ -311,6 +362,8 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
                   setOperator(op.id);
                   setSelectedIds([]);
                   setCategory('All');
+                  setCustomMode('none');
+                  setCustomFilters({ sms: false, voice: false, data: false, ott: false });
                   setAiState({ status: 'idle' });
                 }}
                 className={[
@@ -324,36 +377,6 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
           </div>
         </div>
 
-        <div className="flex-1 space-y-1">
-          <label className="text-xs font-extrabold uppercase text-duored-muted" htmlFor="mobile-number">
-            Mobile Number
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="mobile-number"
-              className="text-input max-w-52"
-              type="tel"
-              maxLength={10}
-              value={mobileNumber}
-              onChange={(event) => {
-                const digits = event.target.value.replace(/[^\d]/g, '').slice(0, 10);
-                setMobileNumber(digits);
-              }}
-              placeholder="Enter 10-digit number"
-            />
-            <button
-              type="button"
-              onClick={handleRecharge}
-              disabled={!mobileReady}
-              className="btn-duored"
-            >
-              Recharge Now
-            </button>
-          </div>
-          {mobileNumber && !mobileReady ? (
-            <p className="text-xs font-bold text-red-600">Enter a valid 10-digit mobile number starting with 6-9.</p>
-          ) : null}
-        </div>
       </section>
 
       {warnings.length > 0 ? (
@@ -394,26 +417,73 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search by data, validity, OTT, voice, price..."
             />
-            <select className="text-input" value={category} onChange={(event) => setCategory(event.target.value)}>
-              {categories.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
+            <select
+              className="text-input"
+              value={customMode === 'data_desc' ? 'custom:data_desc' : category}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === 'custom:data_desc') {
+                  setCustomMode('data_desc');
+                  setCategory('All');
+                  return;
+                }
+                setCustomMode('none');
+                setCategory(value);
+              }}
+            >
+              <optgroup label="Jio categories">
+                {jioCategories.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Custom">
+                <option value="custom:data_desc">Data wise sorting</option>
+              </optgroup>
             </select>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {categories.slice(0, 12).map((item) => (
+            {jioCategories.slice(0, 12).map((item) => (
               <button
                 key={item}
                 type="button"
-                onClick={() => setCategory(item)}
-                className={category === item ? 'chip max-w-full whitespace-normal bg-duored-main text-white' : 'chip max-w-full whitespace-normal'}
+                onClick={() => {
+                  setCategory(item);
+                  setCustomMode('none');
+                }}
+                className={customMode === 'none' && category === item ? 'chip max-w-full whitespace-normal bg-duored-main text-white' : 'chip max-w-full whitespace-normal'}
               >
                 {item}
               </button>
             ))}
+          </div>
+
+          <div className="rounded-2xl border-2 border-duored-border bg-white p-3">
+            <p className="mb-2 text-xs font-extrabold uppercase text-duored-muted">Custom</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomMode((current) => (current === 'data_desc' ? 'none' : 'data_desc'));
+                  setCategory('All');
+                }}
+                className={customMode === 'data_desc' ? 'chip max-w-full whitespace-normal bg-duored-main text-white' : 'chip max-w-full whitespace-normal'}
+              >
+                Data wise sorting
+              </button>
+              {CUSTOM_FILTERS.map((filter) => (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => setCustomFilters((current) => ({ ...current, [filter.key]: !current[filter.key] }))}
+                  className={customFilters[filter.key] ? 'chip max-w-full whitespace-normal bg-duored-main text-white' : 'chip max-w-full whitespace-normal'}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -435,12 +505,6 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
                         <span className="chip-soft max-w-full whitespace-normal text-left">{plan.category}</span>
                         <span className="chip-soft max-w-full whitespace-normal text-left">{plan.subCategory}</span>
                       </div>
-                      <h2 className="text-xl font-extrabold text-duored-ink">{plan.displayName}</h2>
-                      <div className="flex flex-wrap gap-2">
-                        <span className="chip-price">{plan.amountLabel}</span>
-                        {plan.validity ? <span className="chip-soft">{plan.validity}</span> : null}
-                        {plan.highSpeedData ? <span className="chip-soft">{plan.highSpeedData}</span> : null}
-                      </div>
                     </div>
                     <button
                       type="button"
@@ -451,14 +515,12 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
                     </button>
                   </div>
 
-                  <dl className="grid gap-3 sm:grid-cols-2">
+                  <dl className="grid gap-3 md:grid-cols-3">
                     {[
-                      ['Total data', plan.totalData],
-                      ['Voice', plan.voice],
-                      ['SMS', plan.sms],
-                      ['Subscriptions', plan.subscriptions.join(', ')],
+                      ['Plan name', plan.displayName],
+                      ['Price of plan', plan.amountLabel],
+                      ['Validity', plan.validity || 'Unknown'],
                     ]
-                      .filter(([, value]) => value)
                       .map(([label, value]) => (
                         <div key={label} className="rounded-2xl border-2 border-duored-border bg-white px-3 py-2">
                           <dt className="text-xs font-extrabold uppercase text-duored-muted">{label}</dt>
@@ -467,13 +529,45 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
                       ))}
                   </dl>
 
-                  {plan.notes.length ? (
-                    <ul className="space-y-1 break-words text-sm font-semibold text-duored-muted">
-                      {plan.notes.slice(0, 3).map((note) => (
-                        <li key={note}>{note}</li>
-                      ))}
-                    </ul>
-                  ) : null}
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      ['Contains SMS', hasSms(plan) ? plan.sms : 'No'],
+                      ['Voice call', hasVoice(plan) ? plan.voice : 'No'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-2xl border-2 border-duored-border bg-white px-3 py-2">
+                        <dt className="text-xs font-extrabold uppercase text-duored-muted">{label}</dt>
+                        <dd className="break-words font-extrabold text-duored-ink">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    <div className="rounded-2xl border-2 border-duored-border bg-white px-3 py-2">
+                      <p className="text-xs font-extrabold uppercase text-duored-muted">Subscriptions under this plan</p>
+                      <p className="mt-1 break-words font-extrabold text-duored-ink">
+                        {plan.subscriptions.length ? plan.subscriptions.join(', ') : 'No subscriptions'}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border-2 border-duored-border bg-white px-3 py-2">
+                      <p className="text-xs font-extrabold uppercase text-duored-muted">Recharge conditions</p>
+                      <p className="mt-1 break-words font-extrabold text-duored-ink">{planConditionText(plan)}</p>
+                    </div>
+                    <div className="rounded-2xl border-2 border-duored-border bg-white px-3 py-2">
+                      <p className="text-xs font-extrabold uppercase text-duored-muted">Remaining details</p>
+                      <p className="mt-1 break-words font-extrabold text-duored-ink">
+                        {[
+                          plan.highSpeedData ? `Data: ${plan.highSpeedData}` : '',
+                          plan.totalData && plan.totalData !== plan.highSpeedData ? `Total: ${plan.totalData}` : '',
+                          plan.notes.slice(0, 3).join('; '),
+                          plan.details
+                            .filter((detail) => !/validity|voice|sms/i.test(detail.header))
+                            .slice(0, 4)
+                            .map((detail) => `${detail.header}: ${detail.value}`)
+                            .join('; '),
+                        ].filter(Boolean).join(' | ') || 'No extra details'}
+                      </p>
+                    </div>
+                  </div>
                 </article>
               );
             })}
