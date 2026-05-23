@@ -1114,17 +1114,25 @@ function MarketExplorer({
   const [status, setStatus] = useState('Search Amazon, Flipkart, Meesho, and Myntra from one place.');
   const [isSearching, setIsSearching] = useState(false);
   const [hasLoadedPersistedSearch, setHasLoadedPersistedSearch] = useState(false);
+  const [hasSubmittedSearch, setHasSubmittedSearch] = useState(false);
+  const searchRunIdRef = useRef(0);
+  const lastMarketSearchKeyRef = useRef('');
 
   useEffect(() => {
     const snapshot = readStoredJson<Partial<MarketExplorerSnapshot>>(MARKET_EXPLORER_STORAGE_KEY);
     if (snapshot) {
       if (typeof snapshot.query === 'string') setQuery(snapshot.query);
-      setFilters(normalizeMarketFilters(snapshot.filters));
+      const restoredFilters = normalizeMarketFilters(snapshot.filters);
+      setFilters(restoredFilters);
       if (Array.isArray(snapshot.results)) {
         setResults(snapshot.results.filter((product) => !isFallbackMarketProduct(product) && productHasMarketData(product)));
       }
       if (Array.isArray(snapshot.sources)) setSources(snapshot.sources);
       if (typeof snapshot.status === 'string') setStatus(snapshot.status);
+      if (typeof snapshot.query === 'string' && snapshot.query.trim() && (snapshot.results?.length || snapshot.sources?.length)) {
+        lastMarketSearchKeyRef.current = JSON.stringify({ query: snapshot.query.trim(), filters: restoredFilters });
+        setHasSubmittedSearch(true);
+      }
     }
     setHasLoadedPersistedSearch(true);
   }, []);
@@ -1150,7 +1158,17 @@ function MarketExplorer({
     });
   }
 
-  function runSearch() {
+  useEffect(() => {
+    if (!hasLoadedPersistedSearch || !hasSubmittedSearch || !query.trim()) return;
+    const searchKey = JSON.stringify({ query: query.trim(), filters });
+    if (searchKey === lastMarketSearchKeyRef.current) return;
+    const timer = window.setTimeout(() => {
+      runSearch({ auto: true });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [filters, hasLoadedPersistedSearch, hasSubmittedSearch]);
+
+  function runSearch(options?: { auto?: boolean }) {
     const cleanQuery = query.trim();
     if (!cleanQuery) {
       setStatus('Enter a keyword to explore products.');
@@ -1159,10 +1177,15 @@ function MarketExplorer({
       return;
     }
 
+    const runId = searchRunIdRef.current + 1;
+    searchRunIdRef.current = runId;
+    lastMarketSearchKeyRef.current = JSON.stringify({ query: cleanQuery, filters });
+    setHasSubmittedSearch(true);
     setIsSearching(true);
-    setStatus('Searching marketplaces...');
+    setStatus(options?.auto ? 'Updating results...' : 'Searching marketplaces...');
     searchMarket(cleanQuery, filters)
       .then((data) => {
+        if (searchRunIdRef.current !== runId) return;
         const realResults = data.results.filter((product) => !isFallbackMarketProduct(product) && productHasMarketData(product));
         const currentRealResults = results.filter((product) => !isFallbackMarketProduct(product));
         const blockedSources = data.sources.filter((source) => !source.ok);
@@ -1188,11 +1211,14 @@ function MarketExplorer({
         );
       })
       .catch((error) => {
+        if (searchRunIdRef.current !== runId) return;
         setResults([]);
         setSources([]);
         setStatus((error as Error).message);
       })
-      .finally(() => setIsSearching(false));
+      .finally(() => {
+        if (searchRunIdRef.current === runId) setIsSearching(false);
+      });
   }
 
   function runDeepSeekAnalysis(product: MarketProduct) {
@@ -1235,7 +1261,7 @@ function MarketExplorer({
             }}
             placeholder="Search products, for example keyboard, shoes, backpack"
           />
-          <button className="btn-duored" type="button" disabled={isSearching} onClick={runSearch}>
+          <button className="btn-duored" type="button" disabled={isSearching} onClick={() => runSearch()}>
             {isSearching ? 'Searching...' : 'Search market'}
           </button>
         </div>
