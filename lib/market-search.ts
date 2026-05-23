@@ -562,27 +562,6 @@ function sortProducts(products: MarketProduct[], sortBy: MarketSortValue): Marke
   return sorted;
 }
 
-function createSearchFallbackProduct(config: PlatformConfig, query: string, url: string, error?: string): MarketProduct {
-  return {
-    id: `${config.platform}-search-${encodeURIComponent(query.toLowerCase())}`,
-    platform: config.platform,
-    platformLabel: config.label,
-    title: `Search "${query}" on ${config.label}`,
-    description: error
-      ? `${config.label} blocked automatic product extraction (${error}). Open the live search page to view current products.`
-      : `Open the live ${config.label} search page to view current products.`,
-    url,
-    imageUrl: '',
-    price: 0,
-    currency: 'INR',
-    rating: 0,
-    reviewCount: 0,
-    badges: ['Open marketplace'],
-    detailLines: ['Live marketplace search', 'Product details load on the platform'],
-    magicScore: 0,
-  };
-}
-
 const PLATFORM_CONFIGS: Record<MarketPlatform, PlatformConfig> = {
   amazon: { platform: 'amazon', label: PLATFORM_LABELS.amazon, buildUrl: buildAmazonUrl, parse: parseAmazon },
   flipkart: { platform: 'flipkart', label: PLATFORM_LABELS.flipkart, buildUrl: buildFlipkartUrl, parse: parseFlipkart },
@@ -666,12 +645,12 @@ async function searchPlatform(config: PlatformConfig, query: string, filters: Re
 
   const error = primary.error ?? 'No parseable products matched these filters';
   return {
-    products: [createSearchFallbackProduct(config, query, url, error)],
+    products: [] as MarketProduct[],
     source: {
       platform: config.platform,
       label: config.label,
       ok: false,
-      count: 1,
+      count: 0,
       url,
       error,
     },

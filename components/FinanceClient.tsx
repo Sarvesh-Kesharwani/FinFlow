@@ -935,6 +935,19 @@ function isFallbackMarketProduct(product: MarketProduct): boolean {
   return product.badges.some((badge) => /open marketplace/i.test(badge)) || /^Search ".+" on /i.test(product.title);
 }
 
+function productHasMarketData(product: MarketProduct): boolean {
+  return Boolean(
+    product.title.trim() &&
+      product.url.trim() &&
+      (product.imageUrl.trim() ||
+        product.price > 0 ||
+        product.rating > 0 ||
+        product.reviewCount > 0 ||
+        product.detailLines.length > 0 ||
+        product.description.trim()),
+  );
+}
+
 function sortMarketProducts(products: MarketProduct[], sortBy: MarketSortValue): MarketProduct[] {
   if (sortBy === 'relevance') return [...products];
   const direction = sortBy === 'price_asc' ? 1 : -1;
@@ -1107,7 +1120,9 @@ function MarketExplorer({
     if (snapshot) {
       if (typeof snapshot.query === 'string') setQuery(snapshot.query);
       setFilters(normalizeMarketFilters(snapshot.filters));
-      if (Array.isArray(snapshot.results)) setResults(snapshot.results);
+      if (Array.isArray(snapshot.results)) {
+        setResults(snapshot.results.filter((product) => !isFallbackMarketProduct(product) && productHasMarketData(product)));
+      }
       if (Array.isArray(snapshot.sources)) setSources(snapshot.sources);
       if (typeof snapshot.status === 'string') setStatus(snapshot.status);
     }
@@ -1148,18 +1163,29 @@ function MarketExplorer({
     setStatus('Searching marketplaces...');
     searchMarket(cleanQuery, filters)
       .then((data) => {
-        const hasOnlyFallbackResults = data.results.length > 0 && data.results.every(isFallbackMarketProduct);
+        const realResults = data.results.filter((product) => !isFallbackMarketProduct(product) && productHasMarketData(product));
         const currentRealResults = results.filter((product) => !isFallbackMarketProduct(product));
-        if (hasOnlyFallbackResults && currentRealResults.length > 0) {
+        const blockedSources = data.sources.filter((source) => !source.ok);
+        if (realResults.length === 0 && currentRealResults.length > 0) {
           const sortedCurrentResults = sortMarketProducts(currentRealResults, filters.sortBy);
           setResults(sortedCurrentResults);
-          setStatus(`${sortedCurrentResults.length} products sorted from the last successful search.`);
+          setSources(data.sources);
+          setStatus(
+            `${blockedSources.length ? 'Marketplace extraction blocked for current search. ' : ''}${sortedCurrentResults.length} products sorted from the last successful search.`,
+          );
           return;
         }
-        setResults(data.results);
+
+        setResults(realResults);
         setSources(data.sources);
         setAnalysisByProduct({});
-        setStatus(data.results.length ? `${data.results.length} cleaned products found.` : 'No products matched these filters.');
+        setStatus(
+          realResults.length
+            ? `${realResults.length} cleaned products found.`
+            : blockedSources.length
+              ? 'No product data could be extracted. Use the marketplace source links below, or try again with fewer filters.'
+              : 'No products matched these filters.',
+        );
       })
       .catch((error) => {
         setResults([]);
@@ -1325,6 +1351,12 @@ function MarketExplorer({
               />
             ))}
           </ol>
+        )}
+
+        {results.length === 0 && sources.length > 0 && (
+          <div className="rounded-xl border-2 border-dashed border-duored-border bg-duored-soft/40 p-4 font-bold text-duored-muted">
+            No product cards to show yet. The source chips above still open live marketplace result pages.
+          </div>
         )}
       </div>
     </section>
