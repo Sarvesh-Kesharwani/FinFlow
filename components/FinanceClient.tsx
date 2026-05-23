@@ -785,6 +785,12 @@ function createMarketFilterForm(): MarketFilterForm {
   };
 }
 
+function pushAspect(items: ProductAspect[], label: string, value: string | number | undefined, confidence?: ProductAspect['confidence']) {
+  const text = typeof value === 'number' ? String(value) : String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text || /^unknown$/i.test(text) || items.some((item) => item.label === label)) return;
+  items.push({ label, value: text, confidence });
+}
+
 function firstMatch(value: string, patterns: RegExp[]): string {
   for (const pattern of patterns) {
     const match = value.match(pattern);
@@ -840,6 +846,8 @@ function inferProductType(text: string): string {
     [/\bbackpack|bag\b/i, 'Bag'],
     [/\bphone|smartphone\b/i, 'Smartphone'],
     [/\blaptop\b/i, 'Laptop'],
+    [/\bheadphone|earbud|earphone|speaker\b/i, 'Audio'],
+    [/\bwatch|smartwatch\b/i, 'Watch'],
   ];
   return types.find(([pattern]) => pattern.test(text))?.[1] ?? 'Product';
 }
@@ -848,58 +856,79 @@ function buildRegexProductSections(product: MarketProduct): ProductAspectSection
   const text = compactLabel([product.title, product.description, product.detailLines.join(' '), product.badges.join(' ')].join(' '));
   const brand = inferBrand(text) || 'Unknown';
   const productType = inferProductType(text);
-  const capacity = firstMatch(text, [/\b(\d+(?:\.\d+)?\s?(?:TB|GB|MB))\b/i]);
+  const capacity = firstMatch(text, [/\b(\d+(?:\.\d+)?\s?(?:TB|GB|MB|L|litre|liter))\b/i]);
   const speed = firstMatch(text, [/\b(\d+(?:\.\d+)?\s?(?:MB\/s|GB\/s|Gbps|RPM))\b/i]);
   const warranty = firstMatch(text, [/\b(\d+\s?(?:year|years|yr|yrs|Y)\s+warranty)\b/i]);
-  const protection = [
-    firstMatch(text, [/\b(IP\d{2}\s?(?:water\/dust|water|dust)?\s?resistant)\b/i, /\b(water\/dust resistant)\b/i]),
-    firstMatch(text, [/\b(\d+\s?m\s?drop protection)\b/i, /\b(drop protection)\b/i]),
-  ].filter(Boolean).join(', ');
-  const interfaceValue = firstMatch(text, [/\b(USB\s?(?:3\.\d|2\.0|Type-?C|C|A)|Type-?C|Thunderbolt)\b/i]);
+  const interfaceValue = firstMatch(text, [/\b(USB\s?(?:3\.\d|2\.0|Type-?C|C|A)|Type-?C|Thunderbolt|NVMe|SATA)\b/i]);
   const compatibility = firstMatch(text, [/\b(PC|Mac|Windows|Android|iOS|PS5|PS4|Xbox|Smartphone|Laptop)(?:[,/& ]+(?:PC|Mac|Windows|Android|iOS|PS5|PS4|Xbox|Smartphone|Laptop))*\b/i]);
-  const color = firstMatch(text, [/\b(black|white|blue|red|green|silver|grey|gray|gold|pink|purple|brown)\s?(?:color|colour)?\b/i]);
-  const dealBadges = product.badges.length ? product.badges.join(', ') : 'None shown';
+  const color = firstMatch(text, [/\b(black|white|blue|red|green|silver|grey|gray|gold|pink|purple|brown|beige)\s?(?:color|colour)?\b/i]);
+  const identity: ProductAspect[] = [];
+  const signals: ProductAspect[] = [];
+  const specs: ProductAspect[] = [];
+  const fit: ProductAspect[] = [];
 
-  const sections: ProductAspectSection[] = [
-    {
-      title: 'Identity',
-      items: [
-        { label: 'Brand', value: brand },
-        { label: 'Category', value: productType },
-        { label: 'Capacity / size', value: capacity || 'Unknown' },
-      ],
-    },
-    {
-      title: 'Key specs',
-      items: [
-        { label: 'Speed / rating spec', value: speed || 'Unknown' },
-        { label: 'Interface', value: interfaceValue || 'Unknown' },
-        { label: 'Protection', value: protection || 'Unknown' },
-      ],
-    },
-    {
-      title: 'Fit',
-      items: [
-        { label: 'Compatibility', value: compatibility || 'Unknown' },
-        { label: 'Warranty', value: warranty || 'Unknown' },
-        { label: 'Color', value: color || 'Unknown' },
-      ],
-    },
-    {
-      title: 'Market signal',
-      items: [
-        { label: 'Platform', value: product.platformLabel },
-        { label: 'Rating', value: product.rating ? `${product.rating.toFixed(1)} stars` : 'Unknown' },
-        { label: 'Reviews', value: product.reviewCount ? `${product.reviewCount.toLocaleString('en-IN')} reviews` : 'Unknown' },
-        { label: 'Badges', value: dealBadges },
-      ],
-    },
-  ];
+  pushAspect(identity, 'Brand', brand && brand !== 'Unknown' ? brand : '');
+  pushAspect(identity, 'Category', productType);
+  pushAspect(identity, 'Capacity / size', capacity);
+  pushAspect(identity, 'Color', color);
+  pushAspect(signals, 'Platform', product.platformLabel);
+  pushAspect(signals, 'Price', product.price > 0 ? formatMoney(product.price, product.currency) : '');
+  pushAspect(signals, 'Rating', product.rating ? `${product.rating.toFixed(1)} stars` : '');
+  pushAspect(signals, 'Reviews', product.reviewCount ? `${product.reviewCount.toLocaleString('en-IN')} reviews` : '');
+  pushAspect(signals, 'Badges', product.badges.join(', '));
 
-  return sections.map((section) => ({
-    ...section,
-    items: section.items.filter((item) => item.value),
-  }));
+  if (/\bkeyboard\b/i.test(text)) {
+    pushAspect(specs, 'Connection', firstMatch(text, [/\b(wired|wireless|bluetooth|2\.4\s?ghz|usb)\b/i]));
+    pushAspect(specs, 'Layout', firstMatch(text, [/\b(full[- ]?size|tkl|tenkeyless|60%|65%|75%|compact|standard)\b/i]));
+    pushAspect(specs, 'Switch / key type', firstMatch(text, [/\b(mechanical|semi-mechanical|membrane|chiclet|plunger|scissor)\b/i]));
+    if (/backlit|rgb|rainbow/i.test(text)) pushAspect(specs, 'Backlight', firstMatch(text, [/\b(rgb|rainbow|backlit|white backlight)\b/i]) || 'Included');
+    if (/spill[- ]?resistant|water[- ]?resistant/i.test(text)) pushAspect(fit, 'Spill resistance', 'Included');
+    if (/mouse combo|keyboard and mouse|combo/i.test(text)) pushAspect(fit, 'Combo accessory', 'Keyboard + mouse');
+    pushAspect(fit, 'Compatibility', compatibility);
+  } else if (/\b(?:ssd|solid state drive|hdd|hard drive|hard disk)\b/i.test(text)) {
+    pushAspect(specs, 'Storage type', /\b(?:ssd|solid state drive)\b/i.test(text) ? 'SSD' : 'Hard drive');
+    pushAspect(specs, 'Interface', interfaceValue);
+    pushAspect(specs, 'Transfer speed', speed);
+    pushAspect(fit, 'Warranty', warranty);
+    if (/drop protection|water\/dust|water resistant|dust resistant|IP\d{2}/i.test(text)) {
+      pushAspect(fit, 'Protection', firstMatch(text, [/\b(IP\d{2}[^,|]*)\b/i, /\b(\d+\s?m\s?drop protection)\b/i, /\b(water\/dust resistant|water resistant|dust resistant)\b/i]) || 'Protected');
+    }
+  } else if (/\bshoe|sneaker|sandal\b/i.test(text)) {
+    pushAspect(specs, 'Footwear type', firstMatch(text, [/\b(running shoes?|sneakers?|sandals?|sports shoes?|casual shoes?)\b/i]));
+    pushAspect(specs, 'Material', firstMatch(text, [/\b(mesh|leather|synthetic|canvas|rubber|foam)\b/i]));
+    pushAspect(fit, 'Closure', firstMatch(text, [/\b(lace[- ]?up|slip[- ]?on|velcro)\b/i]));
+  } else {
+    pushAspect(specs, 'Interface', interfaceValue);
+    pushAspect(specs, 'Speed / rating spec', speed);
+    pushAspect(fit, 'Compatibility', compatibility);
+    pushAspect(fit, 'Warranty', warranty);
+  }
+
+  if (product.badges.some((badge) => /open marketplace/i.test(badge))) {
+    pushAspect(fit, 'Search fallback', 'Open live marketplace page for current products');
+  }
+
+  return [
+    { title: 'Product identity', items: identity },
+    { title: `${productType} aspects`, items: specs },
+    { title: 'Fit and usage', items: fit },
+    { title: 'Market signal', items: signals },
+  ].filter((section) => section.items.length > 0);
+}
+
+function normalizeComparisonResult(value: unknown): MarketComparisonResult {
+  const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const nested = record.output_shape && typeof record.output_shape === 'object'
+    ? (record.output_shape as Record<string, unknown>)
+    : record;
+  return {
+    common_dimensions: Array.isArray(nested.common_dimensions) ? nested.common_dimensions as MarketComparisonDimension[] : [],
+    uncommon_dimensions: Array.isArray(nested.uncommon_dimensions) ? nested.uncommon_dimensions as MarketUncommonDimension[] : [],
+    requirement_recommendations: Array.isArray(nested.requirement_recommendations)
+      ? nested.requirement_recommendations as MarketRequirementRecommendation[]
+      : [],
+    final_ai_pick: nested.final_ai_pick as MarketComparisonResult['final_ai_pick'],
+  };
 }
 
 async function analyzeMarketProduct(product: MarketProduct): Promise<ProductAspectSection[]> {
@@ -925,7 +954,7 @@ async function compareMarketProducts(products: MarketProduct[]): Promise<MarketC
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'DeepSeek comparison failed');
   }
-  return data.comparison as MarketComparisonResult;
+  return normalizeComparisonResult(data.comparison);
 }
 
 async function searchMarket(query: string, filters: MarketFilterForm): Promise<MarketSearchResponse> {
@@ -1306,7 +1335,7 @@ function CompareMarketView({
           <div>
             <h2 className="section-title mb-1">Compare</h2>
             <p className="text-sm font-semibold text-duored-muted">
-              Select products from Explore Market, then ask DeepSeek for common dimensions, differences, and one final buy pick.
+              Select products from Explore Market, then compare shared dimensions and product-specific aspects separately.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1314,7 +1343,7 @@ function CompareMarketView({
               Clear
             </button>
             <button className="btn-duored" type="button" disabled={products.length < 2 || comparison.status === 'loading'} onClick={onCompare}>
-              {comparison.status === 'loading' ? 'Comparing...' : 'Compare with DeepSeek'}
+              {comparison.status === 'loading' ? 'Comparing...' : 'Compare products'}
             </button>
           </div>
         </div>
@@ -1421,7 +1450,7 @@ function CompareMarketView({
 
             {comparison.result.uncommon_dimensions?.length ? (
               <section className="rounded-xl border-2 border-duored-border bg-white p-4">
-                <h3 className="text-lg font-extrabold text-duored-deep">Uncommon dimensions</h3>
+                <h3 className="text-lg font-extrabold text-duored-deep">Remaining product-specific aspects</h3>
                 <ul className="mt-3 grid gap-2 md:grid-cols-2">
                   {comparison.result.uncommon_dimensions.map((item) => (
                     <li key={`${item.product_ref}-${item.dimension}`} className="rounded-xl bg-duored-soft/50 p-3">
@@ -1434,6 +1463,12 @@ function CompareMarketView({
                   ))}
                 </ul>
               </section>
+            ) : null}
+
+            {!comparison.result.common_dimensions?.length && !comparison.result.uncommon_dimensions?.length ? (
+              <p className="rounded-xl border-2 border-dashed border-duored-border bg-duored-soft/40 p-4 font-bold text-duored-muted">
+                No comparable aspects were found for these selected products.
+              </p>
             ) : null}
           </div>
         )}
@@ -2192,7 +2227,11 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     if (snapshot) {
       if (Array.isArray(snapshot.products)) setMarketComparisonProducts(snapshot.products.slice(0, 6));
       if (snapshot.comparison?.status === 'ready' || snapshot.comparison?.status === 'error') {
-        setMarketComparison(snapshot.comparison);
+        setMarketComparison(
+          snapshot.comparison.status === 'ready'
+            ? { status: 'ready', result: normalizeComparisonResult(snapshot.comparison.result) }
+            : snapshot.comparison,
+        );
       }
     }
 
