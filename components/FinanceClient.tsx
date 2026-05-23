@@ -836,6 +836,7 @@ function inferBrand(text: string): string {
 
 function inferProductType(text: string): string {
   const types: Array<[RegExp, string]> = [
+    [/\bblanket|quilt|dohar\b/i, 'Blanket'],
     [/\bexternal\s+(?:ssd|solid state drive)\b/i, 'External SSD'],
     [/\bexternal\s+(?:hdd|hard drive|hard disk)\b/i, 'External HDD'],
     [/\b(?:ssd|solid state drive)\b/i, 'SSD'],
@@ -852,6 +853,23 @@ function inferProductType(text: string): string {
   return types.find(([pattern]) => pattern.test(text))?.[1] ?? 'Product';
 }
 
+function extractMaterial(text: string): string {
+  return firstMatch(text, [
+    /\b(woollen blend|poly cotton|polyester|microfiber|bamboo|fleece|cotton|mink|flannel|sherpa|leather|synthetic|canvas|rubber|foam|mesh)\b/i,
+  ]);
+}
+
+function extractPattern(text: string): string {
+  return firstMatch(text, [/\b(solid|floral|printed|geometric|striped|checked|abstract|self design)\b/i]);
+}
+
+function extractSizeOrFit(text: string): string {
+  return firstMatch(text, [
+    /\b(single|double|queen|king|free size|onesize|twin|full)\b/i,
+    /\b(\d+(?:\.\d+)?\s?(?:cm|mm|m|inch|inches|ft|feet|kg|kgs|lb|lbs)\s?(?:x|×|-)?\s?\d*(?:\.\d+)?\s?(?:cm|mm|m|inch|inches|ft|feet|kg|kgs|lb|lbs)?)\b/i,
+  ]);
+}
+
 function buildRegexProductSections(product: MarketProduct): ProductAspectSection[] {
   const text = compactLabel([product.title, product.description, product.detailLines.join(' '), product.badges.join(' ')].join(' '));
   const brand = inferBrand(text) || 'Unknown';
@@ -862,22 +880,36 @@ function buildRegexProductSections(product: MarketProduct): ProductAspectSection
   const interfaceValue = firstMatch(text, [/\b(USB\s?(?:3\.\d|2\.0|Type-?C|C|A)|Type-?C|Thunderbolt|NVMe|SATA)\b/i]);
   const compatibility = firstMatch(text, [/\b(PC|Mac|Windows|Android|iOS|PS5|PS4|Xbox|Smartphone|Laptop)(?:[,/& ]+(?:PC|Mac|Windows|Android|iOS|PS5|PS4|Xbox|Smartphone|Laptop))*\b/i]);
   const color = firstMatch(text, [/\b(black|white|blue|red|green|silver|grey|gray|gold|pink|purple|brown|beige)\s?(?:color|colour)?\b/i]);
+  const material = extractMaterial(text);
+  const pattern = extractPattern(text);
+  const sizeOrFit = extractSizeOrFit(text);
   const identity: ProductAspect[] = [];
   const signals: ProductAspect[] = [];
   const specs: ProductAspect[] = [];
   const fit: ProductAspect[] = [];
 
+  pushAspect(identity, 'Product name', product.title);
   pushAspect(identity, 'Brand', brand && brand !== 'Unknown' ? brand : '');
   pushAspect(identity, 'Category', productType);
   pushAspect(identity, 'Capacity / size', capacity);
+  pushAspect(identity, 'Size / fit', sizeOrFit);
   pushAspect(identity, 'Color', color);
+  pushAspect(specs, 'Material', material);
+  pushAspect(specs, 'Pattern', pattern);
+  if (product.description && product.description !== product.title) pushAspect(specs, 'Result details', product.description);
+  if (product.detailLines.length) pushAspect(specs, 'Captured details', product.detailLines.join(' | '));
   pushAspect(signals, 'Platform', product.platformLabel);
   pushAspect(signals, 'Price', product.price > 0 ? formatMoney(product.price, product.currency) : '');
   pushAspect(signals, 'Rating', product.rating ? `${product.rating.toFixed(1)} stars` : '');
   pushAspect(signals, 'Reviews', product.reviewCount ? `${product.reviewCount.toLocaleString('en-IN')} reviews` : '');
   pushAspect(signals, 'Badges', product.badges.join(', '));
 
-  if (/\bkeyboard\b/i.test(text)) {
+  if (/\bblanket|quilt|dohar\b/i.test(text)) {
+    pushAspect(specs, 'Blanket type', firstMatch(text, [/\b(ac room|heavy winter|weighted|fleece|mink|throw|dohar|quilt)\b/i]));
+    pushAspect(specs, 'Outer / fabric', material);
+    pushAspect(fit, 'Ideal usage', firstMatch(text, [/\b(ac room|heavy winter|all season|winter|summer|travel|donation)\b/i]));
+    pushAspect(fit, 'Bed size', sizeOrFit);
+  } else if (/\bkeyboard\b/i.test(text)) {
     pushAspect(specs, 'Connection', firstMatch(text, [/\b(wired|wireless|bluetooth|2\.4\s?ghz|usb)\b/i]));
     pushAspect(specs, 'Layout', firstMatch(text, [/\b(full[- ]?size|tkl|tenkeyless|60%|65%|75%|compact|standard)\b/i]));
     pushAspect(specs, 'Switch / key type', firstMatch(text, [/\b(mechanical|semi-mechanical|membrane|chiclet|plunger|scissor)\b/i]));

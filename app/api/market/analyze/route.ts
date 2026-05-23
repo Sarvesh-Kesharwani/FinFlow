@@ -25,6 +25,27 @@ function extractJsonObject(value: string): unknown {
   throw new Error('DeepSeek did not return JSON');
 }
 
+async function fetchProductPageExcerpt(url: string): Promise<string> {
+  try {
+    const response = await fetch(`https://r.jina.ai/http://${url}`, {
+      headers: {
+        accept: 'text/plain,text/markdown,*/*;q=0.8',
+        'user-agent': 'FinFlow product aspect reader',
+      },
+      signal: AbortSignal.timeout(8000),
+      cache: 'no-store',
+    });
+    if (!response.ok) return '';
+    const text = await response.text();
+    return text
+      .replace(/\s+/g, ' ')
+      .replace(/Sort By Relevance[\s\S]*?Newest First/i, '')
+      .slice(0, 9000);
+  } catch {
+    return '';
+  }
+}
+
 function normalizeSections(value: unknown): ProductAspectSection[] {
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const sections = Array.isArray(record.sections) ? record.sections : [];
@@ -43,16 +64,16 @@ function normalizeSections(value: unknown): ProductAspectSection[] {
                 : undefined;
             return {
               label: String(itemRecord.label ?? '').trim().slice(0, 80),
-              value: String(itemRecord.value ?? '').trim().slice(0, 240),
+              value: String(itemRecord.value ?? '').trim().slice(0, 360),
               confidence,
             };
           })
           .filter((item) => item.label && item.value)
-          .slice(0, 8),
+          .slice(0, 16),
       };
     })
     .filter((section) => section.title && section.items.length > 0)
-    .slice(0, 12);
+    .slice(0, 16);
 }
 
 export async function POST(request: Request) {
@@ -68,11 +89,13 @@ export async function POST(request: Request) {
       return Response.json({ ok: false, error: 'Product details are required.' }, { status: 400 });
     }
 
+    const pageExcerpt = await fetchProductPageExcerpt(product.url);
+
     const messages: DeepSeekMessage[] = [
       {
         role: 'system',
         content:
-          'You convert ecommerce product data into buyer decision dimensions. Return strict JSON only. Do not repeat the raw product title or raw description. Infer useful aspect groups from the product category, similar to product_identity, performance, compatibility, reliability, physical_characteristics, price_and_value, reviews_and_ratings, seller_and_logistics. Use "unknown" for missing facts. Keep values concise.',
+          'You convert ecommerce product data into exhaustive buyer decision dimensions. Return strict JSON only. Extract every concrete feature that can be inferred from title, description, details, badges, price, ratings, image context, platform, and URL slug. Do not invent unsupported facts. Do not omit useful facts just because they are short. Prefer many specific labels over one vague summary. Include product_identity, category_specific_features, material_or_build, size_or_capacity, compatibility_or_usage, reliability_or_warranty, price_and_value, reviews_and_ratings, seller_and_logistics when relevant. Use "unknown" only for important missing facts. Keep values concise but complete.',
       },
       {
         role: 'user',
@@ -97,7 +120,9 @@ export async function POST(request: Request) {
             review_count: product.reviewCount,
             badges: product.badges,
             details: product.detailLines,
+            image_url: product.imageUrl,
             url: product.url,
+            page_excerpt: pageExcerpt,
           },
         }),
       },

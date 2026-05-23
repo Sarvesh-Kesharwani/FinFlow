@@ -601,7 +601,88 @@ function parseReaderReviewCount(text: string): number {
   );
 }
 
+function parseFlipkartReaderMarkdown(markdown: string, sourceUrl: string): MarketProduct[] {
+  const products: MarketProduct[] = [];
+  const seen = new Set<string>();
+  const productLinkPattern =
+    /\[!\[Image\s+\d+:\s*([^\]]{8,260})\]\((https?:\/\/[^)\s]+)\)\]\((https:\/\/www\.flipkart\.com\/[^)\s]+\/p\/[^)\s]+)\)\[([^\]]{8,260})\]\((https:\/\/www\.flipkart\.com\/[^)\s]+\/p\/[^)\s]+)/gi;
+
+  let match: RegExpExecArray | null;
+  while ((match = productLinkPattern.exec(markdown)) !== null && products.length < MAX_RESULTS_PER_PLATFORM) {
+    const imageTitle = cleanText(match[1] ?? '');
+    const imageUrl = secureImageUrl(match[2] ?? '', sourceUrl);
+    const imageLink = match[3] ?? '';
+    const textTitle = cleanText(match[4] ?? '');
+    const textLink = match[5] ?? '';
+    const url = extractMarketplaceUrl(imageLink || textLink, 'flipkart', sourceUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+
+    const nextIndex = markdown.indexOf('[![Image', productLinkPattern.lastIndex);
+    const windowText = markdown.slice(match.index, nextIndex > match.index ? nextIndex : Math.min(markdown.length, match.index + 2200));
+    const title = (textTitle || imageTitle).replace(/\.\.\.$/, '').trim();
+    if (!title || /^₹/.test(title)) continue;
+
+    const lines = windowText
+      .split(/\r?\n/)
+      .map((line) => cleanText(line.replace(/!\[Image\s+\d+\]\([^)]*\)/gi, '')))
+      .filter(Boolean);
+    const materialLine =
+      lines.find((line) =>
+        /,\s*[A-Za-z& ]+$/.test(line) &&
+        !/^(Title:|URL Source:|Markdown Content:|Sort By|Relevance|Popularity|Price --|Newest First)$/i.test(line) &&
+        !line.includes('flipkart.com') &&
+        !line.includes('₹') &&
+        !/^\(?[\d,.KMkm]+\)?$/.test(line),
+      ) ?? '';
+    const price = parsePrice(windowText.match(/\[([^[]*₹[\d,.]+[^[]*)\]\(https:\/\/www\.flipkart\.com\/[^)]*\/p\/[^)]*\)/i)?.[1] ?? '');
+    const rating =
+      Number.parseFloat(windowText.match(/\n\s*([\d.]+)\s*!\[Image\s+\d+\]/i)?.[1] ?? '') ||
+      Number.parseFloat(windowText.match(/\n\s*([\d.]+)\s*\n\s*\(([\d,.KMkm]+)\)/i)?.[1] ?? '') ||
+      0;
+    const reviewCount =
+      parseShortNumber(windowText.match(/\n\s*[\d.]+\s*!\[Image\s+\d+\][\s\S]{0,80}?\n\s*\(([\d,.KMkm]+)\)/i)?.[1] ?? '') ||
+      parseShortNumber(windowText.match(/\n\s*[\d.]+\s*\n\s*\(([\d,.KMkm]+)\)/i)?.[1] ?? '');
+    const lower = windowText.toLowerCase();
+    const badges = [
+      /fa_9e47c1|fassured|assured/i.test(windowText) ? 'Assured' : '',
+      lower.includes('hot deal') || lower.includes('special price') || lower.includes('off') ? 'Deal' : '',
+      lower.includes('only few left') ? 'Low stock' : '',
+    ].filter(Boolean);
+    const detailLines = [
+      materialLine,
+      rating ? `${rating.toFixed(1)} stars` : '',
+      reviewCount ? `${reviewCount.toLocaleString('en-IN')} reviews` : '',
+      badges.join(', '),
+    ].filter(Boolean);
+
+    products.push({
+      id: `flipkart-reader-${products.length}-${url}`,
+      platform: 'flipkart',
+      platformLabel: PLATFORM_LABELS.flipkart,
+      title,
+      description: cleanDescription([title, materialLine, detailLines.join(', ')]),
+      url,
+      imageUrl,
+      price,
+      currency: 'INR',
+      rating,
+      reviewCount,
+      badges,
+      detailLines,
+      magicScore: rating * reviewCount,
+    });
+  }
+
+  return uniqueByUrl(products);
+}
+
 function parseReaderMarkdown(config: PlatformConfig, markdown: string, sourceUrl: string): MarketProduct[] {
+  if (config.platform === 'flipkart') {
+    const flipkartProducts = parseFlipkartReaderMarkdown(markdown, sourceUrl);
+    if (flipkartProducts.length > 0) return flipkartProducts;
+  }
+
   const products: MarketProduct[] = [];
   const seen = new Set<string>();
   const linkRegex =
