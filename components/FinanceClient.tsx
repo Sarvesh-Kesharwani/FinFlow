@@ -16,8 +16,12 @@ import {
   type ExpenseEntry,
   type FinanceStore,
 } from '@/lib/finance-types';
+import type { MarketPlatform, MarketProduct, MarketSearchResponse, MarketSortValue } from '@/lib/market-search';
 
 const CUSTOM_FREQ_PREFIX = 'custom-frequency:';
+const MARKET_EXPLORER_STORAGE_KEY = 'finflow_market_explorer_state';
+const MARKET_COMPARISON_STORAGE_KEY = 'finflow_market_comparison_state';
+const WISHLIST_TAB_STORAGE_KEY = 'finflow_wishlist_tab';
 
 type ExpenseFormMode = 'one-time' | 'repetitive';
 
@@ -100,7 +104,7 @@ type FinanceOp =
   | { op: 'clear_expenses'; bucket: ExpenseBucket }
   | { op: 'bulk_add_expenses'; expenses: unknown[] }
   | { op: 'hydrate_buy_item_photos'; itemIds: string[] }
-  | { op: 'add_buy_item'; url: string; notes?: string }
+  | { op: 'add_buy_item'; url: string; notes?: string; title?: string; price?: number; currency?: string; imageUrl?: string }
   | { op: 'remove_buy_item'; itemId: string }
   | { op: 'move_buy_item'; itemId: string; direction: 'up' | 'down' }
   | { op: 'reorder_buy_item'; itemId: string; targetIndex: number }
@@ -612,6 +616,829 @@ function BuyRow({
         </button>
       </div>
     </li>
+  );
+}
+
+const MARKET_PLATFORM_OPTIONS: Array<{ value: MarketPlatform; label: string }> = [
+  { value: 'amazon', label: 'Amazon' },
+  { value: 'flipkart', label: 'Flipkart' },
+  { value: 'meesho', label: 'Meesho' },
+  { value: 'myntra', label: 'Myntra' },
+];
+
+const MARKET_SORT_OPTIONS: Array<{ value: MarketSortValue; label: string }> = [
+  { value: 'relevance', label: 'Relevance' },
+  { value: 'review_count_desc', label: 'Review count high to low' },
+  { value: 'rating_desc', label: 'Stars high to low' },
+  { value: 'magic_score_desc', label: 'Magic score high to low' },
+  { value: 'price_asc', label: 'Price low to high' },
+  { value: 'price_desc', label: 'Price high to low' },
+];
+
+type MarketFilterForm = {
+  platforms: MarketPlatform[];
+  minReviewCount: string;
+  minRating: string;
+  bestSellerOnly: boolean;
+  primeOnly: boolean;
+  amazonsChoiceOnly: boolean;
+  limitedTimeDealOnly: boolean;
+  sortBy: MarketSortValue;
+};
+
+type ProductAspect = {
+  label: string;
+  value: string;
+  confidence?: 'high' | 'medium' | 'low';
+};
+
+type ProductAspectSection = {
+  title: string;
+  items: ProductAspect[];
+};
+
+type ProductAnalysisState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  sections?: ProductAspectSection[];
+  error?: string;
+};
+
+type MarketComparisonValue = {
+  product_ref: string;
+  value: string;
+};
+
+type MarketComparisonDimension = {
+  dimension: string;
+  values?: MarketComparisonValue[];
+  winner_ref?: string;
+  reason?: string;
+};
+
+type MarketUncommonDimension = {
+  product_ref: string;
+  dimension: string;
+  value: string;
+};
+
+type MarketRequirementRecommendation = {
+  requirement: string;
+  product_ref: string;
+  reason: string;
+};
+
+type MarketComparisonResult = {
+  common_dimensions?: MarketComparisonDimension[];
+  uncommon_dimensions?: MarketUncommonDimension[];
+  requirement_recommendations?: MarketRequirementRecommendation[];
+  final_ai_pick?: {
+    product_ref: string;
+    reason: string;
+    confidence?: 'high' | 'medium' | 'low';
+  };
+};
+
+type MarketComparisonState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  result?: MarketComparisonResult;
+  error?: string;
+};
+
+type WishlistTab = 'explore' | 'compare' | 'cart';
+
+type MarketExplorerSnapshot = {
+  query: string;
+  filters: MarketFilterForm;
+  results: MarketProduct[];
+  sources: MarketSearchResponse['sources'];
+  status: string;
+};
+
+type MarketComparisonSnapshot = {
+  products: MarketProduct[];
+  comparison: MarketComparisonState;
+};
+
+function readStoredJson<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredJson(key: string, value: unknown) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures so the market tools still work in private or restricted browsers.
+  }
+}
+
+function writeStoredText(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage failures so the market tools still work in private or restricted browsers.
+  }
+}
+
+function isWishlistTab(value: unknown): value is WishlistTab {
+  return value === 'explore' || value === 'compare' || value === 'cart';
+}
+
+function normalizeMarketFilters(value: Partial<MarketFilterForm> | undefined): MarketFilterForm {
+  const fallback = createMarketFilterForm();
+  if (!value) return fallback;
+  const platforms = Array.isArray(value.platforms)
+    ? value.platforms.filter((platform): platform is MarketPlatform =>
+        MARKET_PLATFORM_OPTIONS.some((option) => option.value === platform),
+      )
+    : fallback.platforms;
+  const sortBy: MarketSortValue = MARKET_SORT_OPTIONS.some((option) => option.value === value.sortBy)
+    ? (value.sortBy as MarketSortValue)
+    : fallback.sortBy;
+
+  return {
+    platforms: platforms.length ? platforms : fallback.platforms,
+    minReviewCount: typeof value.minReviewCount === 'string' ? value.minReviewCount : fallback.minReviewCount,
+    minRating: typeof value.minRating === 'string' ? value.minRating : fallback.minRating,
+    bestSellerOnly: Boolean(value.bestSellerOnly),
+    primeOnly: Boolean(value.primeOnly),
+    amazonsChoiceOnly: Boolean(value.amazonsChoiceOnly),
+    limitedTimeDealOnly: Boolean(value.limitedTimeDealOnly),
+    sortBy,
+  };
+}
+
+function createMarketFilterForm(): MarketFilterForm {
+  return {
+    platforms: MARKET_PLATFORM_OPTIONS.map((platform) => platform.value),
+    minReviewCount: '',
+    minRating: '',
+    bestSellerOnly: false,
+    primeOnly: false,
+    amazonsChoiceOnly: false,
+    limitedTimeDealOnly: false,
+    sortBy: 'relevance',
+  };
+}
+
+function firstMatch(value: string, patterns: RegExp[]): string {
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]) return match[1].trim();
+    if (match?.[0]) return match[0].trim();
+  }
+  return '';
+}
+
+function compactLabel(value: string): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/\s*[,|]\s*$/g, '')
+    .trim();
+}
+
+function inferBrand(text: string): string {
+  const known = [
+    'SanDisk',
+    'Seagate',
+    'Western Digital',
+    'WD',
+    'Samsung',
+    'Logitech',
+    'Dell',
+    'Zebronics',
+    'Portronics',
+    'Lenovo',
+    'HP',
+    'Sony',
+    'boAt',
+    'Noise',
+    'Puma',
+    'Nike',
+    'Adidas',
+    'HRX',
+    'Elista',
+  ];
+  const found = known.find((brand) => new RegExp(`\\b${brand.replace(/\s+/g, '\\s+')}\\b`, 'i').test(text));
+  if (found) return found;
+  return firstMatch(text, [/^([A-Z][A-Za-z0-9&+-]{1,}(?:\s+[A-Z][A-Za-z0-9&+-]{1,})?)/]);
+}
+
+function inferProductType(text: string): string {
+  const types: Array<[RegExp, string]> = [
+    [/\bexternal\s+(?:ssd|solid state drive)\b/i, 'External SSD'],
+    [/\bexternal\s+(?:hdd|hard drive|hard disk)\b/i, 'External HDD'],
+    [/\b(?:ssd|solid state drive)\b/i, 'SSD'],
+    [/\b(?:hdd|hard drive|hard disk)\b/i, 'Hard drive'],
+    [/\bkeyboard\b/i, 'Keyboard'],
+    [/\bmouse\b/i, 'Mouse'],
+    [/\bshoe|sneaker|sandal\b/i, 'Footwear'],
+    [/\bbackpack|bag\b/i, 'Bag'],
+    [/\bphone|smartphone\b/i, 'Smartphone'],
+    [/\blaptop\b/i, 'Laptop'],
+  ];
+  return types.find(([pattern]) => pattern.test(text))?.[1] ?? 'Product';
+}
+
+function buildRegexProductSections(product: MarketProduct): ProductAspectSection[] {
+  const text = compactLabel([product.title, product.description, product.detailLines.join(' '), product.badges.join(' ')].join(' '));
+  const brand = inferBrand(text) || 'Unknown';
+  const productType = inferProductType(text);
+  const capacity = firstMatch(text, [/\b(\d+(?:\.\d+)?\s?(?:TB|GB|MB))\b/i]);
+  const speed = firstMatch(text, [/\b(\d+(?:\.\d+)?\s?(?:MB\/s|GB\/s|Gbps|RPM))\b/i]);
+  const warranty = firstMatch(text, [/\b(\d+\s?(?:year|years|yr|yrs|Y)\s+warranty)\b/i]);
+  const protection = [
+    firstMatch(text, [/\b(IP\d{2}\s?(?:water\/dust|water|dust)?\s?resistant)\b/i, /\b(water\/dust resistant)\b/i]),
+    firstMatch(text, [/\b(\d+\s?m\s?drop protection)\b/i, /\b(drop protection)\b/i]),
+  ].filter(Boolean).join(', ');
+  const interfaceValue = firstMatch(text, [/\b(USB\s?(?:3\.\d|2\.0|Type-?C|C|A)|Type-?C|Thunderbolt)\b/i]);
+  const compatibility = firstMatch(text, [/\b(PC|Mac|Windows|Android|iOS|PS5|PS4|Xbox|Smartphone|Laptop)(?:[,/& ]+(?:PC|Mac|Windows|Android|iOS|PS5|PS4|Xbox|Smartphone|Laptop))*\b/i]);
+  const color = firstMatch(text, [/\b(black|white|blue|red|green|silver|grey|gray|gold|pink|purple|brown)\s?(?:color|colour)?\b/i]);
+  const dealBadges = product.badges.length ? product.badges.join(', ') : 'None shown';
+
+  const sections: ProductAspectSection[] = [
+    {
+      title: 'Identity',
+      items: [
+        { label: 'Brand', value: brand },
+        { label: 'Category', value: productType },
+        { label: 'Capacity / size', value: capacity || 'Unknown' },
+      ],
+    },
+    {
+      title: 'Key specs',
+      items: [
+        { label: 'Speed / rating spec', value: speed || 'Unknown' },
+        { label: 'Interface', value: interfaceValue || 'Unknown' },
+        { label: 'Protection', value: protection || 'Unknown' },
+      ],
+    },
+    {
+      title: 'Fit',
+      items: [
+        { label: 'Compatibility', value: compatibility || 'Unknown' },
+        { label: 'Warranty', value: warranty || 'Unknown' },
+        { label: 'Color', value: color || 'Unknown' },
+      ],
+    },
+    {
+      title: 'Market signal',
+      items: [
+        { label: 'Platform', value: product.platformLabel },
+        { label: 'Rating', value: product.rating ? `${product.rating.toFixed(1)} stars` : 'Unknown' },
+        { label: 'Reviews', value: product.reviewCount ? `${product.reviewCount.toLocaleString('en-IN')} reviews` : 'Unknown' },
+        { label: 'Badges', value: dealBadges },
+      ],
+    },
+  ];
+
+  return sections.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => item.value),
+  }));
+}
+
+async function analyzeMarketProduct(product: MarketProduct): Promise<ProductAspectSection[]> {
+  const res = await fetch('/api/market/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'DeepSeek analysis failed');
+  }
+  return data.sections as ProductAspectSection[];
+}
+
+async function compareMarketProducts(products: MarketProduct[]): Promise<MarketComparisonResult> {
+  const res = await fetch('/api/market/compare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ products }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'DeepSeek comparison failed');
+  }
+  return data.comparison as MarketComparisonResult;
+}
+
+async function searchMarket(query: string, filters: MarketFilterForm): Promise<MarketSearchResponse> {
+  const res = await fetch('/api/market/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query,
+      filters: {
+        platforms: filters.platforms,
+        minReviewCount: Number(filters.minReviewCount || '0'),
+        minRating: Number(filters.minRating || '0'),
+        bestSellerOnly: filters.bestSellerOnly,
+        primeOnly: filters.primeOnly,
+        amazonsChoiceOnly: filters.amazonsChoiceOnly,
+        limitedTimeDealOnly: filters.limitedTimeDealOnly,
+        sortBy: filters.sortBy,
+      },
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Market search failed');
+  }
+  return data as MarketSearchResponse;
+}
+
+function MarketResultRow({
+  product,
+  isPending,
+  analysis,
+  selectedForCompare,
+  onAdd,
+  onAnalyze,
+  onToggleCompare,
+}: {
+  product: MarketProduct;
+  isPending: boolean;
+  analysis: ProductAnalysisState;
+  selectedForCompare: boolean;
+  onAdd: (product: MarketProduct) => void;
+  onAnalyze: (product: MarketProduct) => void;
+  onToggleCompare: (product: MarketProduct) => void;
+}) {
+  const regexSections = buildRegexProductSections(product);
+  const displaySections = analysis.status === 'ready' && analysis.sections?.length ? analysis.sections : regexSections;
+
+  return (
+    <li className="lift-card flex-col items-start sm:flex-row">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <ItemAvatar title={product.title} imageUrl={product.imageUrl} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="chip-soft px-2 py-0.5 text-xs">{product.platformLabel}</span>
+            {product.badges.map((badge) => (
+              <span key={badge} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-extrabold text-amber-700">
+                {badge}
+              </span>
+            ))}
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            {displaySections.map((section) => (
+              <div key={section.title} className="rounded-xl border-2 border-duored-border bg-white/80 p-3">
+                <p className="text-xs font-extrabold uppercase text-duored-muted">{section.title}</p>
+                <dl className="mt-2 space-y-1">
+                  {section.items.map((item) => (
+                    <div key={`${section.title}-${item.label}`} className="grid grid-cols-[7rem_1fr] gap-2 text-sm">
+                      <dt className="font-extrabold text-duored-ink">{item.label}</dt>
+                      <dd className="font-semibold text-duored-muted">{item.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ))}
+          </div>
+
+          {analysis.status === 'error' && (
+            <p className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
+              {analysis.error}
+            </p>
+          )}
+
+          <a href={product.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-bold text-duored-link underline">
+            Open product page
+          </a>
+        </div>
+      </div>
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+        <span className="chip-price">{product.price > 0 ? formatMoney(product.price, product.currency) : 'Price pending'}</span>
+        <button
+          className="chip-soft"
+          type="button"
+          disabled={analysis.status === 'loading'}
+          onClick={() => onAnalyze(product)}
+        >
+          {analysis.status === 'loading' ? 'Processing...' : analysis.status === 'ready' ? 'Refresh aspects' : 'DeepSeek aspects'}
+        </button>
+        <button className="chip-soft" type="button" onClick={() => onToggleCompare(product)}>
+          {selectedForCompare ? 'In comparison' : 'Add to comparison'}
+        </button>
+        <button className="btn-duored px-3 py-1 text-xs" type="button" disabled={isPending} onClick={() => onAdd(product)}>
+          Add to cart
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function MarketExplorer({
+  isPending,
+  comparisonProducts,
+  onAddProduct,
+  onToggleCompare,
+}: {
+  isPending: boolean;
+  comparisonProducts: MarketProduct[];
+  onAddProduct: (product: MarketProduct) => void;
+  onToggleCompare: (product: MarketProduct) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<MarketFilterForm>(createMarketFilterForm);
+  const [results, setResults] = useState<MarketProduct[]>([]);
+  const [sources, setSources] = useState<MarketSearchResponse['sources']>([]);
+  const [analysisByProduct, setAnalysisByProduct] = useState<Record<string, ProductAnalysisState>>({});
+  const [status, setStatus] = useState('Search Amazon, Flipkart, Meesho, and Myntra from one place.');
+  const [isSearching, setIsSearching] = useState(false);
+  const [hasLoadedPersistedSearch, setHasLoadedPersistedSearch] = useState(false);
+
+  useEffect(() => {
+    const snapshot = readStoredJson<Partial<MarketExplorerSnapshot>>(MARKET_EXPLORER_STORAGE_KEY);
+    if (snapshot) {
+      if (typeof snapshot.query === 'string') setQuery(snapshot.query);
+      setFilters(normalizeMarketFilters(snapshot.filters));
+      if (Array.isArray(snapshot.results)) setResults(snapshot.results);
+      if (Array.isArray(snapshot.sources)) setSources(snapshot.sources);
+      if (typeof snapshot.status === 'string') setStatus(snapshot.status);
+    }
+    setHasLoadedPersistedSearch(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedSearch) return;
+    writeStoredJson(MARKET_EXPLORER_STORAGE_KEY, {
+      query,
+      filters,
+      results,
+      sources,
+      status,
+    } satisfies MarketExplorerSnapshot);
+  }, [filters, hasLoadedPersistedSearch, query, results, sources, status]);
+
+  function togglePlatform(platform: MarketPlatform) {
+    setFilters((current) => {
+      const hasPlatform = current.platforms.includes(platform);
+      const nextPlatforms = hasPlatform
+        ? current.platforms.filter((item) => item !== platform)
+        : [...current.platforms, platform];
+      return { ...current, platforms: nextPlatforms.length ? nextPlatforms : [platform] };
+    });
+  }
+
+  function runSearch() {
+    const cleanQuery = query.trim();
+    if (!cleanQuery) {
+      setStatus('Enter a keyword to explore products.');
+      setResults([]);
+      setSources([]);
+      return;
+    }
+
+    setIsSearching(true);
+    setStatus('Searching marketplaces...');
+    searchMarket(cleanQuery, filters)
+      .then((data) => {
+        setResults(data.results);
+        setSources(data.sources);
+        setAnalysisByProduct({});
+        setStatus(data.results.length ? `${data.results.length} cleaned products found.` : 'No products matched these filters.');
+      })
+      .catch((error) => {
+        setResults([]);
+        setSources([]);
+        setStatus((error as Error).message);
+      })
+      .finally(() => setIsSearching(false));
+  }
+
+  function runDeepSeekAnalysis(product: MarketProduct) {
+    setAnalysisByProduct((current) => ({
+      ...current,
+      [product.url]: { status: 'loading' },
+    }));
+    analyzeMarketProduct(product)
+      .then((sections) => {
+        setAnalysisByProduct((current) => ({
+          ...current,
+          [product.url]: { status: 'ready', sections },
+        }));
+      })
+      .catch((error) => {
+        setAnalysisByProduct((current) => ({
+          ...current,
+          [product.url]: { status: 'error', error: (error as Error).message },
+        }));
+      });
+  }
+
+  return (
+    <section className="card-panel">
+      <div className="flex flex-col gap-3">
+        <div>
+          <h2 className="section-title">Explore Market</h2>
+          <p className="text-sm font-semibold text-duored-muted">
+            Search once, compare cleaned results, then add the product directly to your cart list.
+          </p>
+        </div>
+
+        <div className="grid gap-2 lg:grid-cols-[1fr_auto]">
+          <input
+            className="text-input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') runSearch();
+            }}
+            placeholder="Search products, for example keyboard, shoes, backpack"
+          />
+          <button className="btn-duored" type="button" disabled={isSearching} onClick={runSearch}>
+            {isSearching ? 'Searching...' : 'Search market'}
+          </button>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-xl border-2 border-duored-border bg-duored-soft/40 p-3">
+            <p className="mb-2 text-xs font-extrabold uppercase text-duored-muted">Platforms</p>
+            <div className="flex flex-wrap gap-2">
+              {MARKET_PLATFORM_OPTIONS.map((platform) => (
+                <label key={platform.value} className="chip">
+                  <input
+                    type="checkbox"
+                    checked={filters.platforms.includes(platform.value)}
+                    onChange={() => togglePlatform(platform.value)}
+                  />
+                  <span>{platform.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <input
+              className="text-input"
+              value={filters.minReviewCount}
+              onChange={(event) => setFilters((current) => ({ ...current, minReviewCount: event.target.value }))}
+              inputMode="numeric"
+              placeholder="Min reviews"
+            />
+            <input
+              className="text-input"
+              value={filters.minRating}
+              onChange={(event) => setFilters((current) => ({ ...current, minRating: event.target.value }))}
+              inputMode="decimal"
+              placeholder="Min stars"
+            />
+            <select
+              className="text-input"
+              value={filters.sortBy}
+              onChange={(event) => setFilters((current) => ({ ...current, sortBy: event.target.value as MarketSortValue }))}
+            >
+              {MARKET_SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {[
+            ['bestSellerOnly', 'Best seller'],
+            ['primeOnly', 'Prime / assured'],
+            ['amazonsChoiceOnly', "Amazon's Choice"],
+            ['limitedTimeDealOnly', 'Deals'],
+          ].map(([key, label]) => (
+            <label key={key} className="chip">
+              <input
+                type="checkbox"
+                checked={Boolean(filters[key as keyof MarketFilterForm])}
+                onChange={(event) => setFilters((current) => ({ ...current, [key]: event.target.checked }))}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="rounded-xl border-2 border-duored-border bg-white px-3 py-2 text-sm font-bold text-duored-muted">
+          {status}
+        </div>
+
+        {sources.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {sources.map((source) => (
+              <a
+                key={source.platform}
+                href={source.url}
+                target="_blank"
+                rel="noreferrer"
+                className={`rounded-full border px-3 py-1 text-xs font-extrabold ${
+                  source.ok && source.count > 0
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-amber-200 bg-amber-50 text-amber-700'
+                }`}
+                title={source.error ?? source.url}
+              >
+                {source.label}: {source.count}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <ol className="space-y-2">
+            {results.map((product) => (
+              <MarketResultRow
+                key={`${product.platform}-${product.url}`}
+                product={product}
+                isPending={isPending}
+                analysis={analysisByProduct[product.url] ?? { status: 'idle' }}
+                selectedForCompare={comparisonProducts.some((entry) => entry.url === product.url)}
+                onAdd={onAddProduct}
+                onAnalyze={runDeepSeekAnalysis}
+                onToggleCompare={onToggleCompare}
+              />
+            ))}
+          </ol>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function productComparisonLabel(product: MarketProduct, index: number): string {
+  const identity = buildRegexProductSections(product).find((section) => section.title === 'Identity');
+  const brand = identity?.items.find((item) => item.label === 'Brand')?.value;
+  const category = identity?.items.find((item) => item.label === 'Category')?.value;
+  const capacity = identity?.items.find((item) => item.label === 'Capacity / size')?.value;
+  return [brand && brand !== 'Unknown' ? brand : `P${index + 1}`, category, capacity && capacity !== 'Unknown' ? capacity : '']
+    .filter(Boolean)
+    .join(' ');
+}
+
+function comparisonProductName(productRef: string | undefined, products: MarketProduct[]): string {
+  if (!productRef) return 'Unknown';
+  const index = Number(productRef.replace(/^P/i, '')) - 1;
+  const product = products[index];
+  return product ? `${productRef}: ${productComparisonLabel(product, index)}` : productRef;
+}
+
+function CompareMarketView({
+  products,
+  comparison,
+  onRemove,
+  onClear,
+  onCompare,
+}: {
+  products: MarketProduct[];
+  comparison: MarketComparisonState;
+  onRemove: (url: string) => void;
+  onClear: () => void;
+  onCompare: () => void;
+}) {
+  return (
+    <section className="card-panel">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="section-title mb-1">Compare</h2>
+            <p className="text-sm font-semibold text-duored-muted">
+              Select products from Explore Market, then ask DeepSeek for common dimensions, differences, and one final buy pick.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="chip-soft" type="button" disabled={products.length === 0} onClick={onClear}>
+              Clear
+            </button>
+            <button className="btn-duored" type="button" disabled={products.length < 2 || comparison.status === 'loading'} onClick={onCompare}>
+              {comparison.status === 'loading' ? 'Comparing...' : 'Compare with DeepSeek'}
+            </button>
+          </div>
+        </div>
+
+        {products.length === 0 ? (
+          <p className="rounded-xl border-2 border-dashed border-duored-border bg-duored-soft/40 p-4 font-bold text-duored-muted">
+            No comparison products yet. Use Add to comparison on any market result.
+          </p>
+        ) : (
+          <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {products.map((product, index) => {
+              const sections = buildRegexProductSections(product);
+              const signal = sections.find((section) => section.title === 'Market signal');
+              return (
+                <li key={product.url} className="rounded-xl border-2 border-duored-border bg-white p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-extrabold uppercase text-duored-muted">P{index + 1} · {product.platformLabel}</p>
+                      <p className="mt-1 font-extrabold text-duored-ink">{productComparisonLabel(product, index)}</p>
+                    </div>
+                    <button className="chip-danger px-2 py-1 text-xs" type="button" onClick={() => onRemove(product.url)}>
+                      Remove
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="chip-price">{product.price > 0 ? formatMoney(product.price, product.currency) : 'Price pending'}</span>
+                    {signal?.items.slice(1, 3).map((item) => (
+                      <span key={item.label} className="rounded-full bg-duored-soft px-2 py-1 text-xs font-bold text-duored-muted">
+                        {item.value}
+                      </span>
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+
+        {comparison.status === 'error' && (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
+            {comparison.error}
+          </p>
+        )}
+
+        {comparison.status === 'ready' && comparison.result && (
+          <div className="space-y-4">
+            {comparison.result.final_ai_pick && (
+              <section className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-xs font-extrabold uppercase text-emerald-700">Final AI pick</p>
+                <h3 className="mt-1 text-xl font-black text-emerald-800">
+                  {comparisonProductName(comparison.result.final_ai_pick.product_ref, products)}
+                </h3>
+                <p className="mt-2 font-semibold text-emerald-800">{comparison.result.final_ai_pick.reason}</p>
+                {comparison.result.final_ai_pick.confidence && (
+                  <p className="mt-2 text-xs font-extrabold uppercase text-emerald-700">
+                    Confidence: {comparison.result.final_ai_pick.confidence}
+                  </p>
+                )}
+              </section>
+            )}
+
+            {comparison.result.requirement_recommendations?.length ? (
+              <section className="rounded-xl border-2 border-duored-border bg-white p-4">
+                <h3 className="text-lg font-extrabold text-duored-deep">Buy by requirement</h3>
+                <ul className="mt-3 space-y-2">
+                  {comparison.result.requirement_recommendations.map((item) => (
+                    <li key={`${item.requirement}-${item.product_ref}`} className="rounded-xl bg-duored-soft/50 p-3">
+                      <p className="font-extrabold text-duored-ink">{item.requirement}</p>
+                      <p className="text-sm font-bold text-duored-muted">{comparisonProductName(item.product_ref, products)}</p>
+                      <p className="mt-1 text-sm font-semibold text-duored-muted">{item.reason}</p>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {comparison.result.common_dimensions?.length ? (
+              <section className="rounded-xl border-2 border-duored-border bg-white p-4">
+                <h3 className="text-lg font-extrabold text-duored-deep">Common dimensions</h3>
+                <div className="mt-3 space-y-3">
+                  {comparison.result.common_dimensions.map((dimension) => (
+                    <article key={dimension.dimension} className="rounded-xl border border-duored-border p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-extrabold text-duored-ink">{dimension.dimension}</p>
+                        {dimension.winner_ref && (
+                          <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-extrabold text-emerald-700">
+                            Winner: {comparisonProductName(dimension.winner_ref, products)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        {(dimension.values ?? []).map((value) => (
+                          <p key={`${dimension.dimension}-${value.product_ref}`} className="text-sm font-semibold text-duored-muted">
+                            <span className="font-extrabold text-duored-ink">{value.product_ref}:</span> {value.value}
+                          </p>
+                        ))}
+                      </div>
+                      {dimension.reason && <p className="mt-2 text-sm font-semibold text-duored-muted">{dimension.reason}</p>}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {comparison.result.uncommon_dimensions?.length ? (
+              <section className="rounded-xl border-2 border-duored-border bg-white p-4">
+                <h3 className="text-lg font-extrabold text-duored-deep">Uncommon dimensions</h3>
+                <ul className="mt-3 grid gap-2 md:grid-cols-2">
+                  {comparison.result.uncommon_dimensions.map((item) => (
+                    <li key={`${item.product_ref}-${item.dimension}`} className="rounded-xl bg-duored-soft/50 p-3">
+                      <p className="text-xs font-extrabold uppercase text-duored-muted">
+                        {comparisonProductName(item.product_ref, products)}
+                      </p>
+                      <p className="font-extrabold text-duored-ink">{item.dimension}</p>
+                      <p className="text-sm font-semibold text-duored-muted">{item.value}</p>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1317,6 +2144,10 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
   const [predictedFilter, setPredictedFilter] = useState<FilterState>(createPredictedFilter);
   const [actualFilter, setActualFilter] = useState<FilterState>(createActualFilter);
   const [buyForm, setBuyForm] = useState({ url: '', notes: '' });
+  const [wishlistTab, setWishlistTab] = useState<WishlistTab>('explore');
+  const [marketComparisonProducts, setMarketComparisonProducts] = useState<MarketProduct[]>([]);
+  const [marketComparison, setMarketComparison] = useState<MarketComparisonState>({ status: 'idle' });
+  const [hasLoadedWishlistPersistence, setHasLoadedWishlistPersistence] = useState(false);
   const [wishlistDrag, setWishlistDrag] = useState<{ itemId: string; fromList: 'need' | 'buy' } | null>(null);
   const [wishlistDropTarget, setWishlistDropTarget] = useState<'need' | 'buy' | null>(null);
   const [buyDropIndicator, setBuyDropIndicator] = useState<{ index: number; position: 'before' | 'after' } | null>(null);
@@ -1348,6 +2179,35 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
     }
     return Array.from(values);
   }, [state.expenses]);
+
+  useEffect(() => {
+    if (mode !== 'wishlist') return;
+
+    const storedTab = window.localStorage.getItem(WISHLIST_TAB_STORAGE_KEY);
+    if (isWishlistTab(storedTab)) {
+      setWishlistTab(storedTab);
+    }
+
+    const snapshot = readStoredJson<Partial<MarketComparisonSnapshot>>(MARKET_COMPARISON_STORAGE_KEY);
+    if (snapshot) {
+      if (Array.isArray(snapshot.products)) setMarketComparisonProducts(snapshot.products.slice(0, 6));
+      if (snapshot.comparison?.status === 'ready' || snapshot.comparison?.status === 'error') {
+        setMarketComparison(snapshot.comparison);
+      }
+    }
+
+    setHasLoadedWishlistPersistence(true);
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode !== 'wishlist' || !hasLoadedWishlistPersistence) return;
+
+    writeStoredText(WISHLIST_TAB_STORAGE_KEY, wishlistTab);
+    writeStoredJson(MARKET_COMPARISON_STORAGE_KEY, {
+      products: marketComparisonProducts,
+      comparison: marketComparison.status === 'loading' ? { status: 'idle' } : marketComparison,
+    } satisfies MarketComparisonSnapshot);
+  }, [hasLoadedWishlistPersistence, marketComparison, marketComparisonProducts, mode, wishlistTab]);
 
   function paintDragOverlay(x: number, y: number) {
     const current = dragStateRef.current;
@@ -1447,6 +2307,62 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
         setError((nextError as Error).message);
       })
       .finally(() => setIsPending(false));
+  }
+
+  function addMarketProductToCart(product: MarketProduct) {
+    runMutation(
+      {
+        op: 'add_buy_item',
+        url: product.url,
+        title: product.title,
+        price: product.price,
+        currency: product.currency,
+        imageUrl: product.imageUrl,
+        notes: [product.platformLabel, product.description, product.detailLines.join(' | ')].filter(Boolean).join(' | '),
+      },
+      (current) => {
+        const item: BuyListItem = {
+          id: `optimistic-market-${Date.now()}`,
+          title: product.title,
+          url: product.url,
+          price: product.price,
+          sourcePlatform: product.platformLabel,
+          currency: product.currency,
+          notes: 'Added from Explore Market.',
+          createdAt: new Date().toISOString(),
+          imageUrl: product.imageUrl,
+          returnable: false,
+        };
+        return { ...current, buyList: [...current.buyList, item] };
+      },
+    );
+    setWishlistTab('cart');
+  }
+
+  function toggleMarketComparisonProduct(product: MarketProduct) {
+    setMarketComparison({ status: 'idle' });
+    setMarketComparisonProducts((current) => {
+      if (current.some((entry) => entry.url === product.url)) {
+        return current.filter((entry) => entry.url !== product.url);
+      }
+      return [...current, product].slice(0, 6);
+    });
+  }
+
+  function removeMarketComparisonProduct(url: string) {
+    setMarketComparison({ status: 'idle' });
+    setMarketComparisonProducts((current) => current.filter((entry) => entry.url !== url));
+  }
+
+  function runMarketComparison() {
+    if (marketComparisonProducts.length < 2) {
+      setMarketComparison({ status: 'error', error: 'Select at least two products to compare.' });
+      return;
+    }
+    setMarketComparison({ status: 'loading' });
+    compareMarketProducts(marketComparisonProducts)
+      .then((result) => setMarketComparison({ status: 'ready', result }))
+      .catch((error) => setMarketComparison({ status: 'error', error: (error as Error).message }));
   }
 
   useEffect(() => {
@@ -1881,6 +2797,48 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
 
       {mode === 'wishlist' && (
         <>
+          <section className="flex flex-wrap gap-2">
+            {[
+              ['explore', 'Explore Market'],
+              ['compare', `Compare (${marketComparisonProducts.length})`],
+              ['cart', `Cart (${state.buyList.length + state.needList.length})`],
+            ].map(([tab, label]) => (
+              <button
+                key={tab}
+                className={[
+                  'btn-duo',
+                  wishlistTab === tab
+                    ? 'bg-duored-main text-white shadow-duored'
+                    : 'border-2 border-duored-border bg-white text-duored-ink shadow-card',
+                ].join(' ')}
+                type="button"
+                onClick={() => setWishlistTab(tab as 'explore' | 'compare' | 'cart')}
+              >
+                {label}
+              </button>
+            ))}
+          </section>
+
+          {wishlistTab === 'explore' ? (
+            <MarketExplorer
+              isPending={isPending}
+              comparisonProducts={marketComparisonProducts}
+              onAddProduct={addMarketProductToCart}
+              onToggleCompare={toggleMarketComparisonProduct}
+            />
+          ) : wishlistTab === 'compare' ? (
+            <CompareMarketView
+              products={marketComparisonProducts}
+              comparison={marketComparison}
+              onRemove={removeMarketComparisonProduct}
+              onClear={() => {
+                setMarketComparisonProducts([]);
+                setMarketComparison({ status: 'idle' });
+              }}
+              onCompare={runMarketComparison}
+            />
+          ) : (
+            <>
           <section className="card-panel">
             <h2 className="section-title">Add to buy-list</h2>
             <p className="mb-2 text-sm font-semibold text-duored-muted">
@@ -2224,6 +3182,8 @@ export function FinanceClient({ initialState, mode }: { initialState: FinanceSto
               )}
             </div>
           </section>
+            </>
+          )}
         </>
       )}
     </div>

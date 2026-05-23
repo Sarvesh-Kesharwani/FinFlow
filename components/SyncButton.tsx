@@ -33,12 +33,12 @@ function isStale(cached: CachedSyncStatus | null): boolean {
 
 export function SyncButton() {
   const router = useRouter();
-  const [state, setState] = useState<SyncState>(() => readCachedSyncStatus()?.state ?? 'loading');
-  const [lastSynced, setLastSynced] = useState<string | null>(() => readCachedSyncStatus()?.lastSynced ?? null);
+  const [state, setState] = useState<SyncState>('loading');
+  const [lastSynced, setLastSynced] = useState<string | null>(null);
   const syncingRef = useRef(false);
   const checkingRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
-  const lastCheckRef = useRef(readCachedSyncStatus()?.checkedAt ?? 0);
+  const lastCheckRef = useRef(0);
 
   function emitSyncReady(ready: boolean, nextState = state, syncedAt = lastSynced) {
     lastCheckRef.current = Date.now();
