@@ -61,9 +61,12 @@ type PlatformConfig = {
   parse: (html: string, url: string) => MarketProduct[];
 };
 
-const PRODUCT_FETCH_TIMEOUT_MS = 9000;
+const PRODUCT_FETCH_TIMEOUT_MS = 3000;
+const READER_FETCH_TIMEOUT_MS = 6000;
 const MAX_MARKET_HTML_BYTES = 1600000;
+const MAX_READER_MARKDOWN_BYTES = 900000;
 const MAX_RESULTS_PER_PLATFORM = 16;
+const USE_READER_FIRST = process.env.VERCEL === '1';
 
 const DEFAULT_FILTERS: Required<MarketSearchFilters> = {
   platforms: [...MARKET_PLATFORMS],
@@ -136,6 +139,24 @@ function absoluteUrl(value: string, base: string): string {
 function secureImageUrl(value: string, base: string): string {
   const url = absoluteUrl(value, base);
   return url.startsWith('http://') ? url.replace(/^http:\/\//, 'https://') : url;
+}
+
+function readerUrl(value: string): string {
+  return `https://r.jina.ai/http://${value}`;
+}
+
+function extractMarketplaceUrl(value: string, platform: MarketPlatform, base: string): string {
+  const decoded = decodeURIComponent(decodeHtml(value));
+  const patterns: Record<MarketPlatform, RegExp> = {
+    amazon: /https:\/\/www\.amazon\.in\/[^)\s]+\/dp\/[A-Z0-9]{10}[^)\s]*/i,
+    flipkart: /https:\/\/www\.flipkart\.com\/[^)\s]+\/p\/[^)\s]+/i,
+    meesho: /https:\/\/www\.meesho\.com\/[^)\s]+\/p\/[^)\s]+/i,
+    myntra: /https:\/\/www\.myntra\.com\/[^)\s]+\/buy/i,
+  };
+  const nested = decoded.match(patterns[platform])?.[0] ?? '';
+  if (nested) return absoluteUrl(nested, base).split('#')[0];
+  const direct = absoluteUrl(value, base);
+  return patterns[platform].test(direct) ? direct.split('#')[0] : '';
 }
 
 function uniqueByUrl(products: MarketProduct[]): MarketProduct[] {
@@ -562,6 +583,85 @@ function sortProducts(products: MarketProduct[], sortBy: MarketSortValue): Marke
   return sorted;
 }
 
+function parseReaderRating(text: string): number {
+  return (
+    Number.parseFloat(text.match(/([\d.]+)\s*(?:_)?\s*out of 5 stars/i)?.[1] ?? '') ||
+    Number.parseFloat(text.match(/(?:^|\s)([\d.])(?:\s*)\[?[_\s]*\1\s+out of 5/i)?.[1] ?? '') ||
+    Number.parseFloat(text.match(/(?:^|\s)([\d.])\s*(?:!\[Image \d+\][^\s]*)?\s*[\d,.KMkm]+\s+Ratings?/i)?.[1] ?? '') ||
+    0
+  );
+}
+
+function parseReaderReviewCount(text: string): number {
+  return (
+    parseShortNumber(text.match(/\(([\d,.KMkm]+)\)\]\([^)]*#customerReviews/i)?.[1] ?? '') ||
+    parseShortNumber(text.match(/([\d,.KMkm]+)\s+Ratings?/i)?.[1] ?? '') ||
+    parseShortNumber(text.match(/([\d,.KMkm]+)\s+Reviews?/i)?.[1] ?? '') ||
+    0
+  );
+}
+
+function parseReaderMarkdown(config: PlatformConfig, markdown: string, sourceUrl: string): MarketProduct[] {
+  const products: MarketProduct[] = [];
+  const seen = new Set<string>();
+  const linkRegex =
+    /!\[Image\s+\d+:\s*([^\]]{12,240})\]\((https?:\/\/[^)\s]+)\)\]\(([^)\s]+)\)|##\s+\[([^\]]{12,260})\]\(([^)\s]+)\)|\[([^\]]{12,260})\]\((https?:\/\/[^)\s]+)\)/gi;
+
+  let match: RegExpExecArray | null;
+  while ((match = linkRegex.exec(markdown)) !== null && products.length < MAX_RESULTS_PER_PLATFORM) {
+    const imageTitle = cleanText(match[1] ?? '');
+    const imageUrl = secureImageUrl(match[2] ?? '', sourceUrl);
+    const imageLink = match[3] ?? '';
+    const headingTitle = cleanText(match[4] ?? '');
+    const headingLink = match[5] ?? '';
+    const plainTitle = cleanText(match[6] ?? '');
+    const plainLink = match[7] ?? '';
+    const title = (imageTitle || headingTitle || plainTitle).replace(/\s+\|?\s*TC\s*-\s*\d+$/i, '').trim();
+    if (!title || /^(login|cart|filters|customer ratings|price, product page)$/i.test(title)) continue;
+
+    const url = extractMarketplaceUrl(imageLink || headingLink || plainLink, config.platform, sourceUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+
+    const windowText = markdown.slice(match.index, Math.min(markdown.length, match.index + 1800));
+    const price = parsePrice(windowText);
+    const rating = parseReaderRating(windowText);
+    const reviewCount = parseReaderReviewCount(windowText);
+    const lower = windowText.toLowerCase();
+    const badges = [
+      lower.includes('best seller') ? 'Best seller' : '',
+      lower.includes("amazon's choice") || lower.includes('amazons choice') ? "Amazon's Choice" : '',
+      lower.includes('limited time deal') ? 'Limited time deal' : '',
+      lower.includes('assured') ? 'Assured' : '',
+      lower.includes('off') ? 'Deal' : '',
+    ].filter(Boolean);
+    const detailLines = [
+      rating ? `${rating.toFixed(1)} stars` : '',
+      reviewCount ? `${reviewCount.toLocaleString('en-IN')} reviews` : '',
+      badges.join(', '),
+    ].filter(Boolean);
+
+    products.push({
+      id: `${config.platform}-reader-${products.length}-${url}`,
+      platform: config.platform,
+      platformLabel: config.label,
+      title,
+      description: cleanDescription([title, detailLines.join(', ')]),
+      url,
+      imageUrl,
+      price,
+      currency: 'INR',
+      rating,
+      reviewCount,
+      badges,
+      detailLines,
+      magicScore: rating * reviewCount,
+    });
+  }
+
+  return uniqueByUrl(products);
+}
+
 const PLATFORM_CONFIGS: Record<MarketPlatform, PlatformConfig> = {
   amazon: { platform: 'amazon', label: PLATFORM_LABELS.amazon, buildUrl: buildAmazonUrl, parse: parseAmazon },
   flipkart: { platform: 'flipkart', label: PLATFORM_LABELS.flipkart, buildUrl: buildFlipkartUrl, parse: parseFlipkart },
@@ -604,46 +704,94 @@ async function fetchPlatformProducts(config: PlatformConfig, url: string, filter
   }
 }
 
+async function fetchReaderProducts(config: PlatformConfig, url: string, filters: Required<MarketSearchFilters>) {
+  try {
+    const response = await fetch(readerUrl(url), {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        'user-agent': 'FinFlow market reader',
+        accept: 'text/plain,text/markdown,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(READER_FETCH_TIMEOUT_MS),
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      return { products: [] as MarketProduct[], ok: false, error: `Reader returned ${response.status}` };
+    }
+
+    const markdown = await readLimitedText(response, MAX_READER_MARKDOWN_BYTES);
+    const products = applyFilters(parseReaderMarkdown(config, markdown, url), filters);
+    return {
+      products,
+      ok: true,
+      error: products.length === 0 ? 'Reader found no parseable products' : 'Used Reader fallback',
+    };
+  } catch (error) {
+    return {
+      products: [] as MarketProduct[],
+      ok: false,
+      error: error instanceof Error ? error.message : 'Reader search failed',
+    };
+  }
+}
+
 async function searchPlatform(config: PlatformConfig, query: string, filters: Required<MarketSearchFilters>) {
   const url = config.buildUrl(query, filters);
-  const primary = await fetchPlatformProducts(config, url, filters);
 
-  if (primary.products.length > 0) {
+  if (USE_READER_FIRST) {
+    const [reader, direct] = await Promise.all([
+      fetchReaderProducts(config, url, filters),
+      fetchPlatformProducts(config, url, filters),
+    ]);
+    const result = reader.products.length > 0 ? reader : direct.products.length > 0 ? direct : null;
+    if (result) {
+      return {
+        products: result.products,
+        source: {
+          platform: config.platform,
+          label: config.label,
+          ok: true,
+          count: result.products.length,
+          url,
+          error: result.error === 'Used Reader fallback' ? result.error : undefined,
+        },
+      };
+    }
+
     return {
-      products: primary.products,
+      products: [] as MarketProduct[],
       source: {
         platform: config.platform,
         label: config.label,
-        ok: true,
-        count: primary.products.length,
+        ok: false,
+        count: 0,
         url,
-        error: primary.error,
+        error: reader.error || direct.error || 'No parseable products matched these filters',
       },
     };
   }
 
-  if (filters.sortBy !== 'relevance') {
-    const retryFilters = { ...filters, sortBy: 'relevance' as const };
-    const retryUrl = config.buildUrl(query, retryFilters);
-    if (retryUrl !== url) {
-      const retry = await fetchPlatformProducts(config, retryUrl, filters);
-      if (retry.products.length > 0) {
-        return {
-          products: retry.products,
-          source: {
-            platform: config.platform,
-            label: config.label,
-            ok: true,
-            count: retry.products.length,
-            url: retryUrl,
-            error: primary.error ? `Sorted search failed; used default search instead.` : retry.error,
-          },
-        };
-      }
+  let lastError = '';
+  for (const attempt of [() => fetchPlatformProducts(config, url, filters), () => fetchReaderProducts(config, url, filters)]) {
+    const result = await attempt();
+    if (result.products.length > 0) {
+      return {
+        products: result.products,
+        source: {
+          platform: config.platform,
+          label: config.label,
+          ok: true,
+          count: result.products.length,
+          url,
+          error: result.error === 'Used Reader fallback' ? result.error : undefined,
+        },
+      };
     }
+    lastError = result.error ?? lastError;
   }
 
-  const error = primary.error ?? 'No parseable products matched these filters';
   return {
     products: [] as MarketProduct[],
     source: {
@@ -652,7 +800,7 @@ async function searchPlatform(config: PlatformConfig, query: string, filters: Re
       ok: false,
       count: 0,
       url,
-      error,
+      error: lastError || 'No parseable products matched these filters',
     },
   };
 }
