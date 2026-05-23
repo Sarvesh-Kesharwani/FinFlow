@@ -1299,13 +1299,7 @@ function MarketExplorer({
 }
 
 function productComparisonLabel(product: MarketProduct, index: number): string {
-  const identity = buildRegexProductSections(product).find((section) => section.title === 'Identity');
-  const brand = identity?.items.find((item) => item.label === 'Brand')?.value;
-  const category = identity?.items.find((item) => item.label === 'Category')?.value;
-  const capacity = identity?.items.find((item) => item.label === 'Capacity / size')?.value;
-  return [brand && brand !== 'Unknown' ? brand : `P${index + 1}`, category, capacity && capacity !== 'Unknown' ? capacity : '']
-    .filter(Boolean)
-    .join(' ');
+  return product.title.trim() || `P${index + 1}`;
 }
 
 function comparisonProductName(productRef: string | undefined, products: MarketProduct[]): string {
@@ -1360,11 +1354,22 @@ function CompareMarketView({
               return (
                 <li key={product.url} className="rounded-xl border-2 border-duored-border bg-white p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-extrabold uppercase text-duored-muted">P{index + 1} · {product.platformLabel}</p>
-                      <p className="mt-1 font-extrabold text-duored-ink">{productComparisonLabel(product, index)}</p>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <ItemAvatar title={product.title} imageUrl={product.imageUrl} />
+                      <div className="min-w-0">
+                        <p className="text-xs font-extrabold uppercase text-duored-muted">P{index + 1} · {product.platformLabel}</p>
+                        <p className="mt-1 line-clamp-2 font-extrabold text-duored-ink">{productComparisonLabel(product, index)}</p>
+                        <a
+                          href={product.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-2 inline-flex text-xs font-extrabold text-duored-link underline"
+                        >
+                          Open product
+                        </a>
+                      </div>
                     </div>
-                    <button className="chip-danger px-2 py-1 text-xs" type="button" onClick={() => onRemove(product.url)}>
+                    <button className="chip-danger shrink-0 px-2 py-1 text-xs" type="button" onClick={() => onRemove(product.url)}>
                       Remove
                     </button>
                   </div>
