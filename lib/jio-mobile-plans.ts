@@ -44,7 +44,7 @@ type RawJioPlansPayload = {
   planCategories?: RawJioCategory[];
 };
 
-const JIO_SOURCE_URL = 'https://www.jio.com/selfcare/plans/mobility/prepaid-plans-list/';
+export const JIO_SOURCE_URL = 'https://www.jio.com/selfcare/plans/mobility/prepaid-plans-list/';
 const JIO_PLANS_API =
   'https://www.jio.com/api/jio-mdmdata-service/mdmdata/recharge/plans?productType=MOBILITY&billingType=1';
 
@@ -188,7 +188,7 @@ function flattenPlans(payload: RawJioPlansPayload): JioPlan[] {
 export async function getJioMobilePlans(): Promise<JioPlansResponse> {
   const warnings: string[] = [];
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 1; attempt += 1) {
     try {
       const response = await fetch(JIO_PLANS_API, {
         cache: 'no-store',
@@ -198,7 +198,7 @@ export async function getJioMobilePlans(): Promise<JioPlansResponse> {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36',
         },
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(8000),
       });
 
       if (!response.ok) {

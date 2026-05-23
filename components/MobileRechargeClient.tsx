@@ -34,11 +34,18 @@ const OPERATORS = [
   { id: 'airtel', label: 'Airtel', color: 'bg-red-600' },
 ] as const;
 
+type OperatorId = (typeof OPERATORS)[number]['id'];
+
 const TAB_STORAGE_KEY = 'finflow_mobile_recharge_tab';
 const SELECTED_STORAGE_KEY = 'finflow_mobile_recharge_selected';
 const REQUIREMENT_STORAGE_KEY = 'finflow_mobile_recharge_requirement';
 const OPERATOR_STORAGE_KEY = 'finflow_mobile_recharge_operator';
 const MOBILE_STORAGE_KEY = 'finflow_mobile_recharge_number';
+
+const PLAN_ENDPOINTS: Record<OperatorId, string> = {
+  jio: '/api/mobile-recharge/jio-plans',
+  airtel: '/api/mobile-recharge/airtel-plans',
+};
 
 function clean(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
@@ -84,8 +91,11 @@ function getRechargeUrl(operator: string, mobileNumber: string): string {
 }
 
 export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
+  const [operatorResults, setOperatorResults] = useState<Record<string, MobilePlansResponse>>(operators);
+  const [loadingOperators, setLoadingOperators] = useState<Record<string, boolean>>({});
+  const [requestedOperators, setRequestedOperators] = useState<Record<string, boolean>>({});
   const [tab, setTab] = useState<'plans' | 'compare'>('plans');
-  const [operator, setOperator] = useState<string>('jio');
+  const [operator, setOperator] = useState<string>('airtel');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -97,15 +107,75 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
     const savedTab = localStorage.getItem(TAB_STORAGE_KEY);
     if (savedTab === 'plans' || savedTab === 'compare') setTab(savedTab);
     const savedOperator = localStorage.getItem(OPERATOR_STORAGE_KEY);
-    if (savedOperator && operators[savedOperator]) setOperator(savedOperator);
+    if (savedOperator && (operators[savedOperator]?.plans.length ?? 0) > 0) {
+      setOperator(savedOperator);
+    } else {
+      setOperator('airtel');
+    }
     const savedSelected = localStorage.getItem(SELECTED_STORAGE_KEY);
     if (savedSelected) {
-      const ids = JSON.parse(savedSelected) as unknown;
-      if (Array.isArray(ids)) setSelectedIds(ids.map(String));
+      try {
+        const ids = JSON.parse(savedSelected) as unknown;
+        if (Array.isArray(ids)) setSelectedIds(ids.map(String));
+      } catch {
+        localStorage.removeItem(SELECTED_STORAGE_KEY);
+      }
     }
     setRequirement(localStorage.getItem(REQUIREMENT_STORAGE_KEY) ?? '');
     setMobileNumber(localStorage.getItem(MOBILE_STORAGE_KEY) ?? '');
   }, [operators]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controllers: AbortController[] = [];
+
+    for (const op of OPERATORS) {
+      if ((operatorResults[op.id]?.plans.length ?? 0) > 0 || requestedOperators[op.id]) continue;
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 9000);
+      controllers.push(controller);
+      setRequestedOperators((current) => ({ ...current, [op.id]: true }));
+      setLoadingOperators((current) => ({ ...current, [op.id]: true }));
+
+      fetch(PLAN_ENDPOINTS[op.id], { signal: controller.signal })
+        .then(async (response) => {
+          const data = (await response.json()) as MobilePlansResponse & { ok?: boolean };
+          if (!response.ok) throw new Error(data.warnings?.join(' ') || `Failed to load ${op.label} plans.`);
+          if (!cancelled) {
+            setOperatorResults((current) => ({ ...current, [op.id]: data }));
+          }
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setOperatorResults((current) => ({
+            ...current,
+            [op.id]: {
+              ...(current[op.id] ?? {
+                plans: [],
+                fetchedAt: new Date().toISOString(),
+                sourceUrl: '',
+              }),
+              warnings: [
+                error instanceof DOMException && error.name === 'AbortError'
+                  ? `${op.label} plans are taking too long to load. Try switching back in a moment.`
+                  : error instanceof Error
+                    ? error.message
+                    : `Failed to load ${op.label} plans.`,
+              ],
+            },
+          }));
+        })
+        .finally(() => {
+          window.clearTimeout(timeoutId);
+          if (!cancelled) setLoadingOperators((current) => ({ ...current, [op.id]: false }));
+        });
+    }
+
+    return () => {
+      cancelled = true;
+      controllers.forEach((controller) => controller.abort());
+    };
+  }, [operatorResults, requestedOperators]);
 
   useEffect(() => { localStorage.setItem(TAB_STORAGE_KEY, tab); }, [tab]);
   useEffect(() => { localStorage.setItem(OPERATOR_STORAGE_KEY, operator); }, [operator]);
@@ -113,11 +183,12 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
   useEffect(() => { localStorage.setItem(REQUIREMENT_STORAGE_KEY, requirement); }, [requirement]);
   useEffect(() => { localStorage.setItem(MOBILE_STORAGE_KEY, mobileNumber); }, [mobileNumber]);
 
-  const operatorData = operators[operator];
+  const operatorData = operatorResults[operator];
   const allPlans = operatorData?.plans ?? [];
   const fetchedAt = operatorData?.fetchedAt ?? '';
   const sourceUrl = operatorData?.sourceUrl ?? '';
   const warnings = operatorData?.warnings ?? [];
+  const isLoadingPlans = Boolean(loadingOperators[operator]);
 
   const categories = useMemo(
     () => ['All', ...Array.from(new Set(allPlans.map((plan) => plan.category))).sort((a, b) => a.localeCompare(b))],
@@ -214,13 +285,17 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
             Compare prepaid plans from Jio and Airtel. Select plans, compare shared aspects, then ask DeepSeek which one fits your requirement.
           </p>
           <p className="text-sm font-bold text-duored-muted">
-            {allPlans.length} {operatorLabel} plans loaded. Last refreshed {formatFetchedAt(fetchedAt)}.
+            {isLoadingPlans
+              ? `Loading ${operatorLabel} plans...`
+              : `${allPlans.length} ${operatorLabel} plans loaded. Last refreshed ${formatFetchedAt(fetchedAt)}.`}
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <a href={sourceUrl} target="_blank" rel="noreferrer" className="btn-duo border-2 border-duored-border bg-white text-duored-ink shadow-card">
-            Open {operatorLabel} source
-          </a>
+          {sourceUrl ? (
+            <a href={sourceUrl} target="_blank" rel="noreferrer" className="btn-duo border-2 border-duored-border bg-white text-duored-ink shadow-card">
+              Open {operatorLabel} source
+            </a>
+          ) : null}
         </div>
       </section>
 
@@ -342,6 +417,14 @@ export function MobileRechargeClient({ operators }: MobileRechargeClientProps) {
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
+            {filteredPlans.length === 0 ? (
+              <div className="card-panel xl:col-span-2">
+                <h2 className="section-title">{isLoadingPlans ? `Loading ${operatorLabel} plans` : 'No plans found'}</h2>
+                <p className="font-semibold text-duored-muted">
+                  {isLoadingPlans ? 'Plans will appear here automatically.' : 'Try another search or category.'}
+                </p>
+              </div>
+            ) : null}
             {filteredPlans.map((plan) => {
               const selected = selectedIds.includes(plan.id);
               return (
