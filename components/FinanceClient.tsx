@@ -931,6 +931,24 @@ function normalizeComparisonResult(value: unknown): MarketComparisonResult {
   };
 }
 
+function isFallbackMarketProduct(product: MarketProduct): boolean {
+  return product.badges.some((badge) => /open marketplace/i.test(badge)) || /^Search ".+" on /i.test(product.title);
+}
+
+function sortMarketProducts(products: MarketProduct[], sortBy: MarketSortValue): MarketProduct[] {
+  if (sortBy === 'relevance') return [...products];
+  const direction = sortBy === 'price_asc' ? 1 : -1;
+  const score: Record<MarketSortValue, (product: MarketProduct) => number> = {
+    relevance: () => 0,
+    review_count_desc: (product) => product.reviewCount,
+    rating_desc: (product) => product.rating,
+    magic_score_desc: (product) => product.magicScore,
+    price_desc: (product) => product.price,
+    price_asc: (product) => product.price || Number.MAX_SAFE_INTEGER,
+  };
+  return [...products].sort((a, b) => (score[sortBy](a) - score[sortBy](b)) * direction);
+}
+
 async function analyzeMarketProduct(product: MarketProduct): Promise<ProductAspectSection[]> {
   const res = await fetch('/api/market/analyze', {
     method: 'POST',
@@ -1130,6 +1148,14 @@ function MarketExplorer({
     setStatus('Searching marketplaces...');
     searchMarket(cleanQuery, filters)
       .then((data) => {
+        const hasOnlyFallbackResults = data.results.length > 0 && data.results.every(isFallbackMarketProduct);
+        const currentRealResults = results.filter((product) => !isFallbackMarketProduct(product));
+        if (hasOnlyFallbackResults && currentRealResults.length > 0) {
+          const sortedCurrentResults = sortMarketProducts(currentRealResults, filters.sortBy);
+          setResults(sortedCurrentResults);
+          setStatus(`${sortedCurrentResults.length} products sorted from the last successful search.`);
+          return;
+        }
         setResults(data.results);
         setSources(data.sources);
         setAnalysisByProduct({});
@@ -1223,7 +1249,14 @@ function MarketExplorer({
             <select
               className="text-input"
               value={filters.sortBy}
-              onChange={(event) => setFilters((current) => ({ ...current, sortBy: event.target.value as MarketSortValue }))}
+              onChange={(event) => {
+                const sortBy = event.target.value as MarketSortValue;
+                setFilters((current) => ({ ...current, sortBy }));
+                setResults((current) => {
+                  const realProducts = current.filter((product) => !isFallbackMarketProduct(product));
+                  return realProducts.length > 0 ? sortMarketProducts(realProducts, sortBy) : current;
+                });
+              }}
             >
               {MARKET_SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
