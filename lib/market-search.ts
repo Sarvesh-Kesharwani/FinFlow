@@ -562,6 +562,27 @@ function sortProducts(products: MarketProduct[], sortBy: MarketSortValue): Marke
   return sorted;
 }
 
+function createSearchFallbackProduct(config: PlatformConfig, query: string, url: string, error?: string): MarketProduct {
+  return {
+    id: `${config.platform}-search-${encodeURIComponent(query.toLowerCase())}`,
+    platform: config.platform,
+    platformLabel: config.label,
+    title: `Search "${query}" on ${config.label}`,
+    description: error
+      ? `${config.label} blocked automatic product extraction (${error}). Open the live search page to view current products.`
+      : `Open the live ${config.label} search page to view current products.`,
+    url,
+    imageUrl: '',
+    price: 0,
+    currency: 'INR',
+    rating: 0,
+    reviewCount: 0,
+    badges: ['Open marketplace'],
+    detailLines: ['Live marketplace search', 'Product details load on the platform'],
+    magicScore: 0,
+  };
+}
+
 const PLATFORM_CONFIGS: Record<MarketPlatform, PlatformConfig> = {
   amazon: { platform: 'amazon', label: PLATFORM_LABELS.amazon, buildUrl: buildAmazonUrl, parse: parseAmazon },
   flipkart: { platform: 'flipkart', label: PLATFORM_LABELS.flipkart, buildUrl: buildFlipkartUrl, parse: parseFlipkart },
@@ -586,42 +607,45 @@ async function searchPlatform(config: PlatformConfig, query: string, filters: Re
     });
 
     if (!response.ok) {
+      const error = `Search page returned ${response.status}`;
       return {
-        products: [] as MarketProduct[],
+        products: [createSearchFallbackProduct(config, query, url, error)],
         source: {
           platform: config.platform,
           label: config.label,
           ok: false,
-          count: 0,
+          count: 1,
           url,
-          error: `Search page returned ${response.status}`,
+          error,
         },
       };
     }
 
     const html = await readLimitedText(response, MAX_MARKET_HTML_BYTES);
     const products = applyFilters(config.parse(html, url), filters);
+    const error = products.length === 0 ? 'No parseable products matched these filters' : undefined;
     return {
-      products,
+      products: products.length ? products : [createSearchFallbackProduct(config, query, url, error)],
       source: {
         platform: config.platform,
         label: config.label,
         ok: true,
-        count: products.length,
+        count: products.length || 1,
         url,
-        error: products.length === 0 ? 'No parseable products matched these filters' : undefined,
+        error,
       },
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Search failed';
     return {
-      products: [] as MarketProduct[],
+      products: [createSearchFallbackProduct(config, query, url, errorMessage)],
       source: {
         platform: config.platform,
         label: config.label,
         ok: false,
-        count: 0,
+        count: 1,
         url,
-        error: error instanceof Error ? error.message : 'Search failed',
+        error: errorMessage,
       },
     };
   }
